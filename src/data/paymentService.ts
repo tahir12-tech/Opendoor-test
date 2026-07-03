@@ -127,3 +127,18 @@ export async function deedDownloadUrl(ref: string): Promise<{ ok: boolean; url?:
   if (!data?.ok) return { ok: false, error: data?.error || 'Could not open the deed.' };
   return { ok: true, url: data.url };
 }
+
+export interface ReminderRunResult { ok: boolean; fired?: number; emailed?: number; emailFailed?: number; date?: string; error?: string }
+
+/**
+ * Manually run the expiry-reminder job in test mode (opndoor admin only), so its
+ * behaviour can be verified today without waiting for the 08:00 schedule. Fires
+ * the same idempotent pass; { reset: true } clears the windowed history first so
+ * the run can be repeated. Optional { date } overrides "today".
+ */
+export async function runExpiryReminders(opts?: { date?: string; reset?: boolean }): Promise<ReminderRunResult> {
+  const { data, error } = await sb().functions.invoke('expiry-reminders', { body: { test: true, date: opts?.date, reset: opts?.reset } });
+  if (error) return { ok: false, error: await functionErrorMessage(error, 'Could not run the expiry reminders.') };
+  if (!data?.ok) return { ok: false, error: data?.error || 'Could not run the expiry reminders.' };
+  return { ok: true, fired: data.fired, emailed: data.emailed, emailFailed: data.emailFailed, date: data.date };
+}

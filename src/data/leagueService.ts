@@ -8,8 +8,9 @@
    The page sorts, searches and pages client-side today; a real back end
    could accept sort/search/page params and paginate server-side.
    ===================================================================== */
-import type { LeagueRow, LeagueView, PartnerScope, Role } from './types';
+import type { LeagueRow, LeagueView, PartnerScope, Period, Role } from './types';
 import { ALL_PARTNERS } from './types';
+import { liveAvailable, liveLeague } from './liveAnalytics';
 import { getAgencies } from './orgService';
 import { getRatesFor, homePartner, partnerName } from './partnersService';
 import { AVG_RENT, LEAGUE_REFERRER_NAMES, convFor } from './mock/analyticsModel';
@@ -21,6 +22,8 @@ export interface LeagueOpts {
   scope: PartnerScope;
   /** opndoor admin's in-page partner filter (empty = all). */
   partner?: string;
+  /** The dashboard period, driving the live date range (ignored in mock mode). */
+  period?: Period;
 }
 
 function feesOf(rec: Agency | Branch): number {
@@ -31,6 +34,8 @@ function feesOf(rec: Agency | Branch): number {
 export function getLeague(view: LeagueView, opts: LeagueOpts): LeagueRow[] {
   const { role, scope } = opts;
   const partner = opts.partner || '';
+  // Live mode: every tab (incl. referrers) computed from live records, period-scoped.
+  if (liveAvailable() && opts.period) return liveLeague(view, role, scope, partner, opts.period);
   const rates = getRatesFor(scope === ALL_PARTNERS ? partner || ALL_PARTNERS : scope);
 
   const inScope = (a: Agency): boolean => {

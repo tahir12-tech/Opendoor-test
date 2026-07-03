@@ -27,6 +27,8 @@ export interface AppRecord {
   // Mock seed records omit these and the detail builder synthesises deterministic
   // stand-ins instead; their presence is what makes getApplicationDetail show the
   // exact values that were entered, and when each event actually happened.
+  firstName?: string | null;
+  lastName?: string | null;
   dob?: string | null;          // 'YYYY-MM-DD'
   email?: string | null;
   phone?: string | null;

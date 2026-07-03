@@ -99,18 +99,13 @@ function bandFor(daysUntil: number): ExpiryBand {
  * comes from guaranteeExpiry (tenancy start + 12 months - 1 day), so this view
  * and the reminder job below cannot drift.
  *
- * INTEGRATION (scheduled back-end job, NOT the front end): proactive expiry
- * reminders cannot run from the browser, which is not open when they are due.
- * A Supabase scheduled function (pg_cron / Edge Function on a daily cron) must:
- *   1. Run once every day.
- *   2. For each in-force guarantee compute expiry = guaranteeExpiry(tenancy
- *      start) and daysUntil = expiry - today.
- *   3. Fire a reminder as daysUntil crosses each threshold: 30, 14, 7, then
- *      every day from 7 down to 0 (daily in the final week), recording which
- *      thresholds were already sent so each fires exactly once.
- *   4. Deliver the notification (in-app + email) to the referrer, the
- *      partner's management and opndoor, whether or not anyone has the app open.
- * getUpcomingExpiries is the shared read model for that job and this page.
+ * IMPLEMENTED: the scheduled back-end job is the expiry-reminders Edge Function
+ * (pg_cron -> net.http_post daily, self-gated to 08:00 Europe/London). It fires a
+ * reminder as daysUntil crosses 30, 14, 7, then daily from 6 to 0, recording each
+ * (application, threshold) in expiry_reminders so it fires exactly once, delivered
+ * as a business activity entry AND a branded Resend email to the owning referrer
+ * and partner management. The per-guarantee count surfaces as remindersSent here.
+ * See supabase/functions/expiry-reminders and supabase/EXPIRY-REMINDERS.md.
  */
 export function getUpcomingExpiries(opts: ActivityScope): UpcomingExpiry[] {
   const now = today();
@@ -118,7 +113,7 @@ export function getUpcomingExpiries(opts: ActivityScope): UpcomingExpiry[] {
     .map((g) => {
       const expiry = guaranteeExpiry(parseISO(g.tenancyStart));
       const daysUntil = Math.round((expiry.getTime() - now.getTime()) / DAY);
-      return { ref: g.ref, tenant: g.tenant, prop: g.prop, branch: g.branch, agency: g.agency, partner: g.partner, expiry, daysUntil, band: bandFor(daysUntil) };
+      return { ref: g.ref, tenant: g.tenant, prop: g.prop, branch: g.branch, agency: g.agency, partner: g.partner, expiry, daysUntil, band: bandFor(daysUntil), remindersSent: g.remindersSent ?? 0 };
     })
     .filter((e) => e.daysUntil >= 0) // upcoming only
     .sort((a, b) => a.expiry.getTime() - b.expiry.getTime());

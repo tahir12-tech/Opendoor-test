@@ -233,6 +233,8 @@ export interface UpcomingExpiry {
   /** Whole days from today to the expiry date (>= 0 for upcoming). */
   daysUntil: number;
   band: ExpiryBand;
+  /** Expiry reminders already sent for this guarantee (live mode; 0 in mock). */
+  remindersSent: number;
 }
 
 /* ---------- League tables ---------- */

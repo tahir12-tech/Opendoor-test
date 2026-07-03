@@ -115,8 +115,23 @@
   width: 132px;
   text-align: right;
 }
+.exp-row__reminders {
+  flex-shrink: 0;
+  width: 96px;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  color: var(--ink-mute);
+}
+.exp-row__reminders svg {
+  width: 14px;
+  height: 14px;
+  color: var(--sent);
+}
 @media (max-width: 620px) {
-  .exp-row__date {
+  .exp-row__date,
+  .exp-row__reminders {
     display: none;
   }
   .exp-row__pill {

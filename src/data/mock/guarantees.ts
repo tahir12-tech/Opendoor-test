@@ -20,6 +20,8 @@ export interface UpcomingGuaranteeSeed {
   owner: number;
   /** Tenancy start date, ISO yyyy-mm-dd. */
   tenancyStart: string;
+  /** Expiry reminders already sent for this guarantee (live mode; 0 in mock). */
+  remindersSent?: number;
 }
 
 // Tenancy starts are chosen against the demo "today" (26/06/2026) so the

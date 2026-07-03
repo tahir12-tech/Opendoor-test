@@ -20,10 +20,12 @@ import {
   BX_FIRST, BX_FLATS, BX_LAST, BX_STREETS, BX_TITLES, TREND_MONTHS,
 } from './mock/analyticsModel';
 import { partnerName, getRatesFor, scopeFor } from './partnersService';
-import { guaranteeExpiry, allFull, type FullApp } from './applicationsService';
+import { guaranteeExpiry, allFull, findRecord, type FullApp } from './applicationsService';
+import { contactForApplication } from './orgService';
 import { getLeague } from './leagueService';
 import { SUPABASE_ENABLED } from '@/lib/supabase';
-import { getPaymentSummary, periodRange as realPeriodRange, scopeFull, basisInPeriod, inRange } from './paymentMetrics';
+import { periodRange as realPeriodRange, scopeFull, basisInPeriod, inRange } from './paymentMetrics';
+import { liveAvailable, liveAggregate, liveVolume, liveMonths, getCommissionSettlement } from './liveAnalytics';
 // Type-only import: building the document specs needs no runtime code, so the
 // heavy xlsx library is not pulled into the main bundle. It is dynamically
 // imported in exportBranded, on demand, when an export is actually run.
@@ -176,8 +178,126 @@ function breakdownRows(list: EntityRow[], showParent: boolean): TableRow[] {
   );
 }
 
+/** Live performance export: every figure summed from the hydrated application set. */
+function buildLivePerformanceDoc(role: Role, period: Period): BrandedExport {
+  const scope = scopeFor(role);
+  const a = liveAggregate(role, scope, period);
+  const vol = liveVolume(role, scope, period);
+  const r = getRatesFor(scope);
+  const pPct = Math.round(r.partner * 100);
+  const aPct = Math.round(r.agent * 100);
+  const brk = (rows: LeagueRow[], showParent: boolean): TableRow[] =>
+    rows.map((e) => (showParent ? [e.name, e.sub, e.refs, e.fees, e.refs, e.paid, e.deed, e.refs ? e.deed / e.refs : 0] : [e.name, e.refs, e.fees, e.refs, e.paid, e.deed, e.refs ? e.deed / e.refs : 0]));
+
+  const blocks: BrandedDoc['blocks'] = [
+    { kind: 'section', title: 'Summary' },
+    {
+      kind: 'keyvalue',
+      items: [
+        { label: 'Referrals sent', value: a.sent, type: 'int' },
+        { label: 'Referrals paid', value: a.paid, type: 'int' },
+        { label: 'Deeds issued', value: a.deed, type: 'int' },
+        { label: 'Conversion: Sent to Paid', value: a.sent ? a.paid / a.sent : 0, type: 'pct' },
+        { label: 'Conversion: Paid to Deed', value: a.paid ? a.deed / a.paid : 0, type: 'pct' },
+        { label: 'Conversion: Sent to Deed', value: a.sent ? a.deed / a.sent : 0, type: 'pct' },
+        { label: 'Total guaranteed rent value', value: a.guaranteed, type: 'money' },
+        { label: 'Guarantor fees collected (gross)', value: a.feesGross, type: 'money' },
+        { label: `Partner commission (${pPct}% of one month rent, net of refunds)`, value: a.partnerCommNet, type: 'money' },
+        { label: `Agent commission (${aPct}% of one month rent, net of refunds)`, value: a.agentCommNet, type: 'money' },
+        { label: 'Average monthly rent', value: a.avgRent, type: 'money' },
+        { label: 'Average guarantor fee', value: a.paid ? a.feesGross / a.paid : 0, type: 'money' },
+        { label: 'Total deeds issued', value: a.deed, type: 'int' },
+        { label: 'Total value of deeds issued', value: a.guaranteed, type: 'money' },
+      ],
+    },
+    { kind: 'blank' },
+    { kind: 'section', title: 'Payments and refunds (this period, live)' },
+    {
+      kind: 'keyvalue',
+      items: [
+        { label: 'Guarantor fees collected (gross)', value: a.feesGross, type: 'money' },
+        { label: `Refunds (${a.refundCount})`, value: a.refundValue, type: 'money' },
+        { label: 'Net fees after refunds', value: a.feesNet, type: 'money' },
+        { label: `Partner commission (${pPct}%, net of refunds)`, value: a.partnerCommNet, type: 'money' },
+        { label: `Agent commission (${aPct}%, net of refunds)`, value: a.agentCommNet, type: 'money' },
+        { label: 'Commission excluded on refunded fees (partner + agent)', value: a.partnerCommExcl + a.agentCommExcl, type: 'money' },
+      ],
+    },
+    { kind: 'blank' },
+    { kind: 'section', title: 'Operational health' },
+    {
+      kind: 'keyvalue',
+      items: [
+        { label: 'Stuck at Sent (awaiting payment)', value: a.stuckSent, type: 'int' },
+        { label: 'Stuck at Paid (awaiting deed)', value: a.stuckPaid, type: 'int' },
+        { label: 'Awaiting tenant signature', value: a.awaiting, type: 'int' },
+        { label: 'Awaiting signature more than 7 days', value: a.awaitingAged, type: 'int' },
+        { label: 'Average days Sent to Paid', value: a.avgSentToPaidDays == null ? '—' : `${a.avgSentToPaidDays.toFixed(1)} days` },
+        { label: 'Average days Paid to Deed', value: a.avgPaidToDeedDays == null ? '—' : `${a.avgPaidToDeedDays.toFixed(1)} days` },
+      ],
+    },
+    { kind: 'blank' },
+  ];
+  if (role !== 'referrer') {
+    blocks.push({ kind: 'section', title: 'Breakdown by agency' }, { kind: 'table', columns: BREAKDOWN_COLS('Agency', false), rows: brk(vol.agencies, false) }, { kind: 'blank' });
+  }
+  blocks.push({ kind: 'section', title: 'Breakdown by branch' }, { kind: 'table', columns: BREAKDOWN_COLS('Branch', true), rows: brk(vol.branches, true) }, { kind: 'blank' });
+  blocks.push(
+    { kind: 'section', title: role === 'referrer' ? 'Breakdown by month' : 'Breakdown by referrer' },
+    { kind: 'table', columns: BREAKDOWN_COLS(role === 'referrer' ? 'Month' : 'Referrer', false), rows: brk(vol.referrers, false) },
+    { kind: 'blank' },
+  );
+  blocks.push(
+    { kind: 'section', title: 'Monthly trend (last 12 months)' },
+    {
+      kind: 'table',
+      columns: [
+        { header: 'Month', type: 'text' },
+        { header: 'Referrals', type: 'int' },
+        { header: 'Fees collected (gross)', type: 'money' },
+        { header: 'Deeds issued', type: 'int' },
+      ],
+      rows: liveMonths(role, scope).map((mo) => [mo.label, mo.refs, mo.fees, mo.deeds]),
+    },
+  );
+
+  // Commission settlement: prior calendar month, payable on the 15th, net of refunds.
+  if (role !== 'referrer') {
+    const st = getCommissionSettlement(role, scope);
+    const settleDay = `${st.settlementDate.getDate()}/${pad(st.settlementDate.getMonth() + 1)}/${st.settlementDate.getFullYear()}`;
+    blocks.push({ kind: 'blank' }, { kind: 'section', title: `Commission settlement (${st.monthLabel}, payable ${settleDay})` });
+    if (!st.partners.length) {
+      blocks.push({ kind: 'keyvalue', items: [{ label: 'Payable', value: 'No partner commission accrued in the prior calendar month.' }] });
+    } else {
+      blocks.push({
+        kind: 'keyvalue',
+        items: st.partners.map((p) => ({ label: `Commission payable to ${p.partnerName}`, value: p.commission, type: 'money' as const })),
+      });
+      blocks.push({
+        kind: 'table',
+        columns: [
+          { header: 'Partner', type: 'text' },
+          { header: 'Guarantee reference', type: 'text' },
+          { header: 'Branch', type: 'text' },
+          { header: 'Agency', type: 'text' },
+          { header: 'Paid date', type: 'text' },
+          { header: 'Guarantor fee', type: 'money' },
+          { header: 'Partner commission', type: 'money' },
+        ],
+        rows: st.partners.flatMap((p) => p.apps.map((ap) => [p.partnerName, ap.ref, ap.branch, ap.agency, dmy(ap.paidAt), ap.rent, ap.commission] as TableRow)),
+      });
+    }
+  }
+
+  const [ds, de] = realPeriodRange(period);
+  const metaLine = `${period.label} (${dmy(ds)} to ${dmy(de)}) · ${role === 'referrer' ? 'Your referrals only' : 'Whole estate'} · Partner: ${scopeLabel(role)} · Generated ${generatedOn()} · GBP · Live records`;
+  const doc: BrandedDoc = { reportName: 'Performance export', metaLine, blocks };
+  return { sheets: [{ name: 'Performance', doc }], filename: `opndoor-performance-${period.id}-${fileStamp()}.xlsx` };
+}
+
 /** Performance export: branded single-sheet .xlsx for the selected period and scope. */
 export function buildPerformanceDoc(role: Role, period: Period): BrandedExport {
+  if (liveAvailable()) return buildLivePerformanceDoc(role, period);
   const m = exportModel(role, period);
   const xrates = getRatesFor(scopeFor(role));
   const pPct = Math.round(xrates.partner * 100);
@@ -225,26 +345,8 @@ export function buildPerformanceDoc(role: Role, period: Period): BrandedExport {
     { kind: 'blank' },
   ];
 
-  // Live payment + refund figures (Supabase mode): honest gross / less refunds / net.
-  const pay = SUPABASE_ENABLED ? getPaymentSummary(role, scopeFor(role), period) : null;
-  if (pay?.available) {
-    const r = getRatesFor(scopeFor(role));
-    blocks.push(
-      { kind: 'section', title: 'Payments and refunds (this period, live)' },
-      {
-        kind: 'keyvalue',
-        items: [
-          { label: 'Guarantor fees collected (gross)', value: pay.feesGross, type: 'money' },
-          { label: `Refunds (${pay.refundCount})`, value: pay.refundValue, type: 'money' },
-          { label: 'Net fees after refunds', value: pay.feesNet, type: 'money' },
-          { label: `Partner commission (${Math.round(r.partner * 100)}%, net of refunds)`, value: pay.feesNet * r.partner, type: 'money' },
-          { label: `Agent commission (${Math.round(r.agent * 100)}%, net of refunds)`, value: pay.feesNet * r.agent, type: 'money' },
-          { label: 'Commission excluded on refunded fees (partner + agent)', value: pay.refundValue * (r.partner + r.agent), type: 'money' },
-        ],
-      },
-      { kind: 'blank' },
-    );
-  }
+  // (Live payment/refund figures are produced by buildLivePerformanceDoc; this
+  // synthetic path is only reached in mock/test mode.)
 
   if (role !== 'referrer') {
     blocks.push({ kind: 'section', title: 'Breakdown by agency' }, { kind: 'table', columns: BREAKDOWN_COLS('Agency', false), rows: breakdownRows(m.agencies, false) }, { kind: 'blank' });
@@ -549,9 +651,10 @@ function leagueRows(view: LeagueView, rows: LeagueRow[]): TableRow[] {
 
 /**
  * League export: a branded three-sheet workbook (Agencies, Branches,
- * Referrers), respecting role + partner scoping. The period is shown in the
- * metadata for document consistency (the league table itself is the current
- * book, not period-filtered, exactly as the on-screen league is).
+ * Referrers), respecting role + partner scoping. In live (Supabase) mode the
+ * tables are period-filtered by real dates (same as the on-screen league); in
+ * mock mode the league is the modelled current book. The metadata date range
+ * reflects the actual window filtered.
  */
 export function buildLeagueDoc(role: Role, scope: PartnerScope, partner: string, period: Period): BrandedExport {
   const views: { view: LeagueView; name: string }[] = [
@@ -559,13 +662,21 @@ export function buildLeagueDoc(role: Role, scope: PartnerScope, partner: string,
     { view: 'branch', name: 'Branches' },
     { view: 'referrer', name: 'Referrers' },
   ];
-  const metaLine = brandMeta(period, role === 'referrer' ? 'Your slice' : 'Whole estate', leaguePartnerLabel(scope, partner));
+  const scopeText = role === 'referrer' ? 'Your slice' : 'Whole estate';
+  const partnerLabel = leaguePartnerLabel(scope, partner);
+  let metaLine: string;
+  if (liveAvailable()) {
+    const [ds, de] = realPeriodRange(period);
+    metaLine = `${period.label} (${dmy(ds)} to ${dmy(de)}) · ${scopeText} · Partner: ${partnerLabel} · Generated ${generatedOn()} · GBP · Live records`;
+  } else {
+    metaLine = brandMeta(period, scopeText, partnerLabel);
+  }
   const sheets = views.map(({ view, name }) => ({
     name,
     doc: {
       reportName: `League table: ${name}`,
       metaLine,
-      blocks: [{ kind: 'table', columns: leagueColumns(view), rows: leagueRows(view, getLeague(view, { role, scope, partner })) }],
+      blocks: [{ kind: 'table', columns: leagueColumns(view), rows: leagueRows(view, getLeague(view, { role, scope, partner, period })) }],
     } as BrandedDoc,
   }));
   return { sheets, filename: `opndoor-league-${fileStamp()}.xlsx` };
@@ -576,29 +687,73 @@ function bxIssuedCount(y: number, m0: number): number {
   return 58 + ((seed * 37) % 53);
 }
 
+/** Live bordereau: real applications whose TENANCY START falls in the month,
+    Deed Issued, excluding refunded. Format and columns are frozen identical to
+    the synthetic version; only the row source changes. Whole opndoor book. */
+export function buildLiveBordereau(year: number, m0: number, insuranceRate: number): { csv: string; filename: string } {
+  const ratePct = `${insuranceRate}%`;
+  const mStart = new Date(year, m0, 1, 0, 0, 0, 0);
+  const mEnd = new Date(year, m0 + 1, 0, 23, 59, 59, 999);
+  const dobDmy = (iso: string | null | undefined): string => {
+    const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(iso ?? '');
+    return m ? `${m[3]}/${m[2]}/${m[1]}` : '';
+  };
+  // Tenancies commencing in month M, Deed Issued, not refunded (per the rule).
+  const apps = allFull()
+    .filter((a) => a.status === 'deed' && !a.refunded && a.tenancyStart && a.tenancyStart >= mStart && a.tenancyStart <= mEnd)
+    .sort((x, y) => (x.tenancyStart!.getTime() - y.tenancyStart!.getTime()) || x.ref.localeCompare(y.ref));
+
+  const rows: CsvRow[] = [];
+  rows.push(['opndoor Guarantee Referral Portal — underwriter bordereau (C&C format)']);
+  rows.push(['Generated', new Date().toLocaleString('en-GB')]);
+  rows.push(['Month', `${MONTH_NAMES[m0]} ${year} (by tenancy commencement date)`]);
+  rows.push(['Scope', 'All partners (opndoor whole book). Partner shown per row.']);
+  rows.push(['Guarantees issued', apps.length]);
+  rows.push(['Insurance rate applied', ratePct]);
+  rows.push(['Currency', 'GBP']);
+  rows.push(['Confidential', 'Contains full tenant personal data. For the underwriter only.']);
+  rows.push([]);
+  rows.push(['Partner', 'Guarantee Reference', 'Tenant Title', 'First Name', 'Last Name', 'DOB', 'Tenant Role', 'Property Address 1', 'Property Address 2', 'City/Town', 'County', 'Postcode', 'Claim Contact (Agent)', 'Issue Date', 'Tenancy Date', 'Guarantee Expiry', 'Monthly Rent', 'Insurance %', 'Status']);
+  for (const a of apps) {
+    const rec = findRecord(a.ref);
+    // Claim Contact (Agent): the resolved agent email, else the agency name so the
+    // required column is never blank (matches the synthetic column).
+    const claimContact = contactForApplication(a.agency, a.branch).contact?.email || a.agency;
+    const first = rec?.firstName ?? (rec?.name ? rec.name.split(/\s+/).slice(0, -1).join(' ') : '');
+    const last = rec?.lastName ?? (rec?.name ? rec.name.split(/\s+/).slice(-1).join(' ') : '');
+    const expiry = a.expiry ?? (a.tenancyStart ? guaranteeExpiry(a.tenancyStart) : null);
+    rows.push([
+      partnerName(a.partner), a.ref, rec?.title ?? '', first, last,
+      dobDmy(rec?.dob), 'Tenant', rec?.addr1 ?? '', rec?.addr2 ?? '', rec?.city ?? '', rec?.county ?? '', rec?.postcode ?? '', claimContact,
+      a.deedAt ? dmy(a.deedAt) : '', a.tenancyStart ? dmy(a.tenancyStart) : '', expiry ? dmy(expiry) : '', gbp(a.rent), ratePct, 'Deed Issued',
+    ]);
+  }
+  return { csv: toCSV(rows), filename: `opndoor-bordereau-${year}-${pad(m0 + 1)}.csv` };
+}
+
 /**
  * Monthly underwriter bordereau (C&C format). opndoor-admin only; full tenant PII.
+ * Buckets by TENANCY START DATE: tenancies commencing in month M are reported to
+ * C&C by the 15th of M+1. Deed Issued only, refunded guarantees excluded (a
+ * refunded guarantee carries no risk and owes no premium). Live-sourced in
+ * Supabase mode; the modelled generator remains for mock/test.
  *
- * Refund policy: a refunded guarantee carries no risk and owes no premium, so it must
- * NOT appear on the bordereau. This bordereau is synthesised (it has no real refunds);
- * when wired to real records, exclude payment_state = 'refunded' from the issued set.
- *
- * INTEGRATION: mid-period reversals - a guarantee already on a previously generated
- * bordereau, then refunded - are excluded from FUTURE bordereaux. Whether the earlier
- * bordereau is corrected by removal or by a negative line is a pending C&C decision;
- * it is not invented here, and is flagged for review.
+ * INTEGRATION: mid-period reversals - a guarantee already on a submitted month's
+ * bordereau, then refunded afterwards - are handled as a CORRECTION on the
+ * following month's return (the refunded guarantee simply drops out; whether the
+ * correction is a removal or an explicit negative line is a convention pending
+ * C&C confirmation). It is not invented here; flagged for review.
  */
 export function buildBordereauCsv(role: Role, year: number, m0: number, insuranceRate: number): { csv: string; filename: string } | null {
   if (role !== 'superadmin') return null; // strictly gated: blocked even if triggered
-  // NOTE: when this is wired to live records, filter out refunded guarantees here
-  // (payment_state = 'refunded'); see the refund-policy note above.
+  if (liveAvailable()) return buildLiveBordereau(year, m0, insuranceRate);
   const ratePct = `${insuranceRate}%`;
   const N = bxIssuedCount(year, m0);
   const daysInMonth = new Date(year, m0 + 1, 0).getDate();
   const rows: CsvRow[] = [];
   rows.push(['opndoor Guarantee Referral Portal — underwriter bordereau (C&C format)']);
   rows.push(['Generated', new Date().toLocaleString('en-GB')]);
-  rows.push(['Month', `${MONTH_NAMES[m0]} ${year} (by guarantee issue date)`]);
+  rows.push(['Month', `${MONTH_NAMES[m0]} ${year} (by tenancy commencement date)`]);
   rows.push(['Scope', 'All partners (opndoor whole book). Partner shown per row.']);
   rows.push(['Guarantees issued', N]);
   rows.push(['Insurance rate applied', ratePct]);
@@ -607,9 +762,11 @@ export function buildBordereauCsv(role: Role, year: number, m0: number, insuranc
   rows.push([]);
   rows.push(['Partner', 'Guarantee Reference', 'Tenant Title', 'First Name', 'Last Name', 'DOB', 'Tenant Role', 'Property Address 1', 'Property Address 2', 'City/Town', 'County', 'Postcode', 'Claim Contact (Agent)', 'Issue Date', 'Tenancy Date', 'Guarantee Expiry', 'Monthly Rent', 'Insurance %', 'Status']);
   for (let i = 0; i < N; i++) {
-    const issueDay = 1 + Math.floor((i / N) * (daysInMonth - 1));
-    const issue = new Date(year, m0, issueDay);
-    const tenancy = addDays(issue, 4 + (i % 14));
+    // Bucket by TENANCY START in month M (matches the live path); the deed is
+    // issued shortly before the tenancy commences.
+    const tenancyDay = 1 + Math.floor((i / N) * (daysInMonth - 1));
+    const tenancy = new Date(year, m0, tenancyDay);
+    const issue = addDays(tenancy, -(4 + (i % 14)));
     // Guarantee Expiry is the tenancy date + 12 months - 1 day (one shared rule).
     const expiry = guaranteeExpiry(tenancy);
     const dobYear = 1990 + ((i * 5) % 16);

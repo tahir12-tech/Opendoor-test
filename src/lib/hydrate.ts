@@ -85,7 +85,7 @@ export async function hydrateFromSupabase(userId: string): Promise<void> {
         'prop_addr1, prop_addr2, prop_city, prop_county, prop_postcode, ' +
         'monthly_rent, status, beneficiary, tenancy_start, sent_at, paid_at, deed_issued_at, expiry_date, ' +
         'payment_state, refunded_at, refunded_amount, paid_amount, refund_after_start, ' +
-        'deed_state, deed_sent_at, deed_viewed_at, ' +
+        'deed_state, deed_sent_at, deed_viewed_at, expiry_reminders_sent, ' +
         'referrer_id, branch_id, agency_id, partner_id, ' +
         'branch:branches(name), agency:agencies(name), referrer:users!referrer_id(full_name), partner:partners(slug)',
     ),
@@ -212,6 +212,15 @@ export async function hydrateFromSupabase(userId: string): Promise<void> {
   }));
 
   const toDate = (ts: any): Date | null => (ts ? new Date(ts) : null);
+  // Postgres DATE columns (tenancy_start, expiry_date) arrive as bare
+  // 'YYYY-MM-DD'. new Date() would parse them as UTC midnight, which then
+  // misbuckets/off-by-ones under local-time comparisons and formatting (e.g. the
+  // bordereau's monthly window). Parse them at LOCAL midnight instead.
+  const toLocalDate = (s: any): Date | null => {
+    if (!s) return null;
+    const p = String(s).slice(0, 10).split('-');
+    return new Date(+p[0], +p[1] - 1, +p[2]);
+  };
   const fullOut: FullApp[] = apps.map((a) => ({
     ref: a.guarantee_ref,
     partner: slugOfApp(a),
@@ -224,8 +233,8 @@ export async function hydrateFromSupabase(userId: string): Promise<void> {
     sentAt: toDate(a.sent_at),
     paidAt: toDate(a.paid_at),
     deedAt: toDate(a.deed_issued_at),
-    tenancyStart: toDate(a.tenancy_start),
-    expiry: toDate(a.expiry_date),
+    tenancyStart: toLocalDate(a.tenancy_start),
+    expiry: toLocalDate(a.expiry_date),
     refunded: a.payment_state === 'refunded',
     refundedAt: toDate(a.refunded_at),
     refundedAmount: a.refunded_amount != null ? num(a.refunded_amount) : null,
@@ -250,6 +259,8 @@ export async function hydrateFromSupabase(userId: string): Promise<void> {
     referrer: emb(a.referrer)?.full_name ?? '',
     owner: ownerFlag(a),
     // Real values so the detail view shows exactly what was entered, and when.
+    firstName: a.tenant_first_name ?? null,
+    lastName: a.tenant_last_name ?? null,
     dob: a.tenant_dob ?? null,
     email: a.tenant_email ?? null,
     phone: a.tenant_phone ?? null,
@@ -265,7 +276,9 @@ export async function hydrateFromSupabase(userId: string): Promise<void> {
   /* ---- upcoming expiries: near-term in-force (deed) guarantees ---- */
   const horizon = Date.now() + 90 * DAY;
   const upcomingOut: UpcomingGuaranteeSeed[] = apps
-    .filter((a) => a.status === 'deed' && a.expiry_date && new Date(a.expiry_date).getTime() <= horizon)
+    // In-force = Deed Issued AND not refunded (matches fire_expiry_reminders), so a
+    // refunded guarantee never shows here looking like it should get reminders.
+    .filter((a) => a.status === 'deed' && a.payment_state !== 'refunded' && a.expiry_date && new Date(a.expiry_date).getTime() <= horizon)
     .map((a) => ({
       ref: a.guarantee_ref,
       tenant: fullName(a),
@@ -275,6 +288,7 @@ export async function hydrateFromSupabase(userId: string): Promise<void> {
       partner: slugOfApp(a),
       owner: ownerFlag(a),
       tenancyStart: a.tenancy_start,
+      remindersSent: a.expiry_reminders_sent ?? 0,
     }));
 
   hydratePartners(partnersOut);

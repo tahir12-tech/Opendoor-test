@@ -3,18 +3,24 @@
    both scoped by role and partner. Reached from the "View all activity" link
    in the notifications popover.
 
-   Upcoming expiries is a read-only view of what is lapsing soon. The proactive
-   reminders (30/14/7/daily) are a scheduled back-end job; see the INTEGRATION
-   note in activityService.getUpcomingExpiries. This page does not fake them.
+   Upcoming expiries shows what is lapsing soon, with a "reminders sent" count per
+   guarantee. The proactive reminders (30/14/7 then daily) are the scheduled
+   expiry-reminders Edge Function (pg_cron, 08:00 Europe/London); opndoor admin can
+   run that job now in test mode here. See supabase/EXPIRY-REMINDERS.md.
    ===================================================================== */
+import { useState } from 'react';
 import { Link } from 'react-router-dom';
-import { getActivity, getAwaitingSignature, getUpcomingExpiries, type ActivityKind, type ExpiryBand } from '@/data';
+import { getActivity, getAwaitingSignature, getUpcomingExpiries, runExpiryReminders, type ActivityKind, type ExpiryBand } from '@/data';
 import { useSession } from '@/session/SessionContext';
+import { SUPABASE_ENABLED, sb } from '@/lib/supabase';
+import { hydrateFromSupabase } from '@/lib/hydrate';
 import { usePageMeta } from '@/components/layout/pageMeta';
+import { Button } from '@/components/ui/Button';
 import { Card, CardBody, CardHead } from '@/components/ui/Card';
 import { Eyebrow } from '@/components/ui/Eyebrow';
 import { Icon } from '@/components/ui/Icon';
 import { Pill, type PillVariant } from '@/components/ui/Pill';
+import { useToast } from '@/components/ui/Toast';
 import './Activity.css';
 
 const dmy = (d: Date) => `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}/${d.getFullYear()}`;
@@ -36,10 +42,27 @@ function untilText(daysUntil: number): string {
 export function Activity() {
   usePageMeta('activity', 'Activity', ['Home', 'Activity']);
   const { role, partnerScope } = useSession();
+  const toast = useToast();
+  const [, forceRefresh] = useState(0);
+  const [running, setRunning] = useState(false);
 
   const feed = getActivity({ role, scope: partnerScope });
   const expiries = getUpcomingExpiries({ role, scope: partnerScope });
   const awaitingSig = getAwaitingSignature(role, partnerScope);
+
+  // opndoor admin: run the expiry-reminder job now (test mode) and refresh.
+  async function runReminders() {
+    setRunning(true);
+    const r = await runExpiryReminders({});
+    if (r.ok) {
+      try { const { data } = await sb().auth.getUser(); if (data.user) await hydrateFromSupabase(data.user.id); } catch { /* ignore */ }
+      forceRefresh((n) => n + 1);
+      toast(`Expiry reminders (test) for ${r.date}: ${r.fired ?? 0} fired${r.emailed ? `, ${r.emailed} emailed` : ''}${r.emailFailed ? `, ${r.emailFailed} email(s) failed - see admin activity log` : ''}.`);
+    } else {
+      toast(r.error || 'Could not run the expiry reminders.');
+    }
+    setRunning(false);
+  }
 
   const counts = {
     soon: expiries.filter((e) => e.band === 'soon').length,
@@ -63,10 +86,17 @@ export function Activity() {
           title="Upcoming expiries"
           sub="Guarantees approaching expiry in your scope, soonest first."
           actions={
-            <div className="exp-summary">
-              <span className="exp-chip exp-chip--soon"><span className="exp-chip__n">{counts.soon}</span><span className="exp-chip__l">within 7 days</span></span>
-              <span className="exp-chip exp-chip--warn"><span className="exp-chip__n">{counts.warn}</span><span className="exp-chip__l">within 14 days</span></span>
-              <span className="exp-chip exp-chip--notice"><span className="exp-chip__n">{counts.notice}</span><span className="exp-chip__l">within 30 days</span></span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+              <div className="exp-summary">
+                <span className="exp-chip exp-chip--soon"><span className="exp-chip__n">{counts.soon}</span><span className="exp-chip__l">within 7 days</span></span>
+                <span className="exp-chip exp-chip--warn"><span className="exp-chip__n">{counts.warn}</span><span className="exp-chip__l">within 14 days</span></span>
+                <span className="exp-chip exp-chip--notice"><span className="exp-chip__n">{counts.notice}</span><span className="exp-chip__l">within 30 days</span></span>
+              </div>
+              {SUPABASE_ENABLED && role === 'superadmin' && (
+                <Button variant="ghost" size="sm" onClick={runReminders} disabled={running} title="Run the daily expiry-reminder job now in test mode, against today's expiring guarantees">
+                  <Icon name="bell" /> {running ? 'Running…' : 'Run reminders (test)'}
+                </Button>
+              )}
             </div>
           }
         />
@@ -84,6 +114,10 @@ export function Activity() {
                 <div className="exp-row__date">
                   <div className="lbl">Expires</div>
                   <div className="val">{dmy(e.expiry)}</div>
+                </div>
+                <div className="exp-row__reminders" title={e.remindersSent > 0 ? `${e.remindersSent} expiry reminder${e.remindersSent === 1 ? '' : 's'} sent` : 'No expiry reminders sent yet'}>
+                  <Icon name="bell" strokeWidth={1.9} />
+                  <span>{e.remindersSent > 0 ? `${e.remindersSent} sent` : 'None sent'}</span>
                 </div>
                 <div className="exp-row__pill"><Pill variant={BAND_PILL[e.band]}>{untilText(e.daysUntil)}</Pill></div>
               </div>

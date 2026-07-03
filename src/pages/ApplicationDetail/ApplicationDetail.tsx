@@ -53,6 +53,7 @@ const feedColor = (kind: string): string => {
   if (kind === 'payment_received') return 'var(--paid)';
   if (kind === 'deed_reminder_failed') return 'var(--warn, #c77d0a)';
   if (kind === 'refunded' || kind === 'deed_error' || kind === 'payment_email_failed') return 'var(--danger, #d64545)';
+  if (kind === 'expiry_reminder') return 'var(--warn, #c77d0a)';
   if (kind === 'deed_issued' || kind === 'deed_signed' || kind === 'deed_reissued') return 'var(--deed)';
   if (kind === 'referral_created' || kind === 'payment_email_sent' || kind === 'deed_viewed' || kind === 'deed_archived') return 'var(--sent)';
   return 'var(--heliotrope)';

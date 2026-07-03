@@ -73,7 +73,7 @@ export function League() {
   const [partner, setPartner] = useState('');
 
   const cols = COLS[view];
-  const all = getLeague(view, { role, scope: partnerScope, partner });
+  const all = getLeague(view, { role, scope: partnerScope, partner, period });
 
   const filtered = useMemo(() => {
     const needle = q.trim().toLowerCase();

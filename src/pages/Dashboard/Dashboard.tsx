@@ -10,12 +10,11 @@
 import { useMemo, useState } from 'react';
 import {
   ALL_PARTNERS, buildApplicationDoc, buildBordereauCsv, buildPerformanceDoc, downloadCsv, exportBranded,
-  fmtBig, getDashboardData, getMonthlyTrend, getPartners, getPaymentSummary, getPeriods, getRatesFor, partnerName,
-  trendPartnerRate, type Period,
+  fmtBig, getCommissionSettlement, getDashboardData, getPartners, getPeriods, getTrend, partnerName,
+  type LeagueRow, type Period, type TrendRow,
 } from '@/data';
 import { BASIS_META, type ExportBasis } from '@/data';
-import type { ShapeRow } from '@/data/mock/analyticsModel';
-import { DEFAULT_INSURANCE_RATE, convFor } from '@/data/mock/analyticsModel';
+import { DEFAULT_INSURANCE_RATE } from '@/data/mock/analyticsModel';
 import { useSession } from '@/session/SessionContext';
 import { usePageMeta } from '@/components/layout/pageMeta';
 import { Button } from '@/components/ui/Button';
@@ -47,31 +46,25 @@ function measureLabel(m: string): string {
  * agency on branch bars). Returns the bars, the total for the count line, and a
  * fixed max for the conversion measure (scaled against 100%).
  */
-function buildChartRows(key: ChartKey, rows: ShapeRow[], m: Measure): { bars: BarRow[]; total: number; max?: number } {
+function buildChartRows(key: ChartKey, rows: LeagueRow[], m: Measure): { bars: BarRow[]; total: number; max?: number } {
   const showConv = key === 'branch' || key === 'agency';
   const isConv = m === 'conv' && showConv;
   const total = rows.length;
 
   if (isConv) {
     const sorted = rows
-      .map((r) => {
-        const [sp, pd] = convFor(key, r[0]);
-        return { label: r[0], sub: r[3], pct: Math.round(sp * pd * 100) };
-      })
+      .map((r) => ({ label: r.name, sub: r.sub || undefined, pct: Math.round(r.conv * 100) }))
       .sort((a, b) => b.pct - a.pct)
       .slice(0, TOP_N);
     return { bars: sorted.map((x) => ({ label: x.label, sub: x.sub, value: x.pct, display: `${x.pct}%` })), total, max: 100 };
   }
 
-  const sorted = rows.slice().sort((a, b) => (m === 'value' ? b[2] - a[2] : b[1] - a[1])).slice(0, TOP_N);
+  const sorted = rows.slice().sort((a, b) => (m === 'value' ? b.fees - a.fees : b.refs - a.refs)).slice(0, TOP_N);
   const bars: BarRow[] = sorted.map((r) => {
     const subBits: string[] = [];
-    if (r[3]) subBits.push(r[3]);
-    if (showConv) {
-      const [sp, pd] = convFor(key, r[0]);
-      subBits.push(`${Math.round(sp * pd * 100)}% Sent to Deed`);
-    }
-    return { label: r[0], sub: subBits.join(' · ') || undefined, value: m === 'value' ? r[2] : r[1], display: m === 'value' ? fmtBig(r[2]) : String(r[1]) };
+    if (r.sub) subBits.push(r.sub);
+    if (showConv) subBits.push(`${Math.round(r.conv * 100)}% Sent to Deed`);
+    return { label: r.name, sub: subBits.join(' · ') || undefined, value: m === 'value' ? r.fees : r.refs, display: m === 'value' ? fmtBig(r.fees) : String(r.refs) };
   });
   return { bars, total };
 }
@@ -80,16 +73,16 @@ export function Dashboard() {
   usePageMeta('dashboard', 'Dashboard', ['Home', 'Dashboard']);
   const { role, partnerScope, selectedPartner, setSelectedPartner, period, setPeriod } = useSession();
 
+  // Every figure comes from getDashboardData: live records in Supabase mode
+  // (d.live), the deterministic synthetic model in mock/test mode.
   const d = useMemo(() => getDashboardData(role, period, partnerScope), [role, period, partnerScope]);
-  // Live payment + refund figures (Supabase mode only). The funnel/charts above
-  // remain the modelled portfolio; these are the real, honest payment truth.
-  const pay = getPaymentSummary(role, partnerScope, period as Period);
+  // Partner commission settlement for the prior calendar month (payment-date
+  // accrual, net of refunds), payable on the 15th. Live mode only; ignores the
+  // period filter (it is a fixed monthly settlement question).
+  const settlement = useMemo(() => getCommissionSettlement(role, partnerScope), [role, partnerScope]);
   const gbpExact = (n: number) => `£${Math.round(n).toLocaleString('en-GB')}`;
-  const payRates = getRatesFor(partnerScope);
-  const partnerCommNet = pay.feesNet * payRates.partner;
-  const agentCommNet = pay.feesNet * payRates.agent;
-  const partnerCommExcl = pay.refundValue * payRates.partner;
-  const agentCommExcl = pay.refundValue * payRates.agent;
+  const settleDate = `${settlement.settlementDate.getDate()} ${settlement.settlementDate.toLocaleDateString('en-GB', { month: 'long' })} ${settlement.settlementDate.getFullYear()}`;
+  const dmyShort = (x: Date) => `${String(x.getDate()).padStart(2, '0')}/${String(x.getMonth() + 1).padStart(2, '0')}/${x.getFullYear()}`;
 
   const [measure, setMeasure] = useState<Record<ChartKey, Measure>>({ branch: 'value', agency: 'value', referrer: 'value' });
   const [trendView, setTrendView] = useState<TrendView>('month');
@@ -103,23 +96,22 @@ export function Dashboard() {
   const eyebrowText = `${role === 'superadmin' ? `${scopeName} · ` : ''}Performance · ${period.label}`;
 
   // ---- volume charts ----
-  const chartMeta: { key: ChartKey; rows: ShapeRow[]; scope: string }[] = [
+  const chartMeta: { key: ChartKey; rows: LeagueRow[]; scope: string }[] = [
     { key: 'branch', rows: d.branches, scope: d.branchScope },
     { key: 'agency', rows: d.agencies, scope: d.agencyScope },
     { key: 'referrer', rows: d.referrers, scope: d.referrerScope },
   ];
 
   // ---- monthly trend ----
-  const partnerRate = trendPartnerRate(role, partnerScope);
-  const trendVal = (r: ShapeRow): number => (trendMeasure === 'count' ? r[1] : trendMeasure === 'commission' ? r[2] * partnerRate : r[2]);
-  const rawTrend = getMonthlyTrend(trendView);
+  const trendVal = (r: TrendRow): number => (trendMeasure === 'count' ? r.count : trendMeasure === 'commission' ? r.comm : r.fees);
+  const rawTrend = getTrend(trendView, role, partnerScope);
   const trendRows: BarRow[] = useMemo(() => {
     const rows = rawTrend.slice();
     // "By month" keeps chronological order (latest highlighted); breakdowns sort by value.
     if (trendView !== 'month') rows.sort((a, b) => trendVal(b) - trendVal(a));
-    return rows.map((r) => ({ label: r[0], sub: r[3], value: trendVal(r), display: trendMeasure === 'count' ? String(r[1]) : fmtBig(trendVal(r)) }));
+    return rows.map((r) => ({ label: r.label, sub: r.sub, value: trendVal(r), display: trendMeasure === 'count' ? String(r.count) : fmtBig(trendVal(r)) }));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rawTrend, trendView, trendMeasure, partnerRate]);
+  }, [rawTrend, trendView, trendMeasure]);
   const trendTopIndex = trendView === 'month' ? trendRows.length - 1 : 0;
   const trendSub = `${measureLabel(trendMeasure)} · ${trendView === 'month' ? 'last 12 months' : `by ${trendView} · last 12 months`}`;
 
@@ -226,9 +218,20 @@ export function Dashboard() {
                 <div className="fstage__bar"><i /></div>
               </div>
             </div>
+            {d.live && (
+              <div className="funnel-note">
+                <Icon name="info" strokeWidth={2} />
+                <span>Conversion is <b>period throughput</b>: each stage counts the events that occurred within the period, so a rate can exceed 100% when payments or deeds land this period for referrals sent earlier.</span>
+              </div>
+            )}
           </CardBody>
           <CardFoot>
-            <span className="muted" style={{ fontSize: 12.5 }}>Overall sent to deed conversion <b style={{ color: 'var(--ink)' }}>{d.overall}</b></span>
+            <span className="muted" style={{ fontSize: 12.5 }}>
+              Overall sent to deed conversion <b style={{ color: 'var(--ink)' }}>{d.overall}</b>
+              {d.live && d.awaiting > 0 && (
+                <> · <b style={{ color: 'var(--sent)' }}>{d.awaiting}</b> awaiting tenant signature{d.awaitingAged > 0 ? ` (${d.awaitingAged} over 7 days)` : ''}</>
+              )}
+            </span>
             <Button variant="quiet" size="sm" to="/applications" arrow>View all applications</Button>
           </CardFoot>
         </Card>
@@ -244,43 +247,64 @@ export function Dashboard() {
               <p style={{ position: 'relative', fontSize: 13, color: 'rgba(255,255,255,0.72)', marginTop: 8, maxWidth: '42ch' }}>
                 Annual rent under guarantee across {d.deedcount} issued deeds, at an initial 12-month guarantee period each.
               </p>
-              <div className="hero-kpi__sub">
-                <span className="lbl">Guarantor fees collected (one month's rent each)</span>
-                <span className="val">{d.fees}</span>
-              </div>
+              {d.live ? (
+                <div className="hero-kpi__split">
+                  <div><span className="k">Fees collected (gross)</span><span className="v">{d.feesGross}</span></div>
+                  <div><span className="k">Less refunds{d.refundCount ? ` (${d.refundCount})` : ''}</span><span className="v v--neg">{d.refunds}</span></div>
+                  <div><span className="k">Net fees</span><span className="v">{d.net}</span></div>
+                </div>
+              ) : (
+                <div className="hero-kpi__sub">
+                  <span className="lbl">Guarantor fees collected (one month's rent each)</span>
+                  <span className="val">{d.fees}</span>
+                </div>
+              )}
             </div>
           </RoleOnly>
 
           <RoleOnly roles={['referrer']}>
             <div className="card hero-kpi hero-kpi--dark">
-              <div className="kpi__label">Your fees collected</div>
+              <div className="kpi__label">Your fees collected{d.live ? ' (net of refunds)' : ''}</div>
               <div className="hero-kpi__row" style={{ marginTop: 10 }}>
-                <span className="hero-kpi__big">{d.fees}</span>
+                <span className="hero-kpi__big">{d.live ? d.net : d.fees}</span>
               </div>
               <p style={{ position: 'relative', fontSize: 13, color: 'rgba(255,255,255,0.72)', marginTop: 8, maxWidth: '42ch' }}>
                 Guarantor fees from the referrals you sent that reached Paid, at one month's rent each.
               </p>
-              <div className="hero-kpi__sub">
-                <span className="lbl">Your referrals paid</span>
-                <span className="val">{d.paid}</span>
-              </div>
+              {d.live ? (
+                <div className="hero-kpi__split">
+                  <div><span className="k">Fees collected (gross)</span><span className="v">{d.feesGross}</span></div>
+                  <div><span className="k">Less refunds{d.refundCount ? ` (${d.refundCount})` : ''}</span><span className="v v--neg">{d.refunds}</span></div>
+                  <div><span className="k">Your referrals paid</span><span className="v">{d.paid}</span></div>
+                </div>
+              ) : (
+                <div className="hero-kpi__sub">
+                  <span className="lbl">Your referrals paid</span>
+                  <span className="val">{d.paid}</span>
+                </div>
+              )}
             </div>
           </RoleOnly>
 
           <RoleOnly roles={['superadmin', 'management']}>
             <div className="card hero-kpi">
               <div className="spread">
-                <div className="kpi__label">Commission earned to date</div>
+                <div className="kpi__label">{d.live ? 'Commission earned' : 'Commission earned to date'}</div>
                 <Tag>{d.commTag}</Tag>
               </div>
               <div className="hero-kpi__row" style={{ marginTop: 14 }}>
                 <span className="comm-headline">{d.commHeadline}</span>
-                <span className="kpi__delta kpi__delta--up"><Icon name="caretUp" strokeWidth={2.4} />12.4% vs prior period</span>
+                {d.live
+                  ? (d.refundCount > 0 && <span className="muted" style={{ fontSize: 12 }}>Excluded on refunds {d.commExcl}</span>)
+                  : <span className="kpi__delta kpi__delta--up"><Icon name="caretUp" strokeWidth={2.4} />12.4% vs prior period</span>}
               </div>
               <div style={{ marginTop: 'auto', paddingTop: 18, borderTop: '1px solid var(--line)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
                 <span className="muted" style={{ fontSize: 13 }}>{d.commSecondLbl}</span>
                 <span style={{ fontFamily: 'var(--display)', fontWeight: 700, fontSize: 18, color: 'var(--ink)' }}>{d.commSecondVal}</span>
               </div>
+              {d.live && d.refundCount > 0 && (
+                <div className="muted" style={{ fontSize: 11.5, marginTop: 8 }}>{d.commExclDetail} excluded on refunded fees</div>
+              )}
             </div>
           </RoleOnly>
 
@@ -303,46 +327,49 @@ export function Dashboard() {
           </RoleOnly>
         </section>
 
-        {/* LIVE PAYMENTS (Supabase mode) */}
-        {pay.available && (
-          <section className="paylive card">
-            <div className="paylive__head">
-              <div>
-                <div className="kpi__label">Live payments this period</div>
-                <div className="muted" style={{ fontSize: 12, marginTop: 3 }}>Real Stripe figures for {period.label}. Refunds are reported alongside and do not change paid or conversion. The funnel and volume charts show the modelled portfolio.</div>
+        {/* Live payment figures (gross/refunds/net + net commission) are folded
+            into the hero KPIs above; there is no separate block. */}
+
+        {/* COMMISSION SETTLEMENT (prior calendar month, payable on the 15th) */}
+        {d.live && settlement.partners.length > 0 && (
+          <RoleOnly roles={['superadmin', 'management']}>
+            <section className="card settle">
+              <div className="settle__head">
+                <div>
+                  <div className="kpi__label">Commission settlement</div>
+                  <div className="muted" style={{ fontSize: 12.5, marginTop: 3 }}>
+                    Partner commission accrued on payments in <b>{settlement.monthLabel}</b> (calendar month, net of refunds), payable on the 15th.
+                  </div>
+                </div>
               </div>
-              <Pill variant="paid" style={{ fontSize: 12 }}>{pay.paidInPeriod} paid</Pill>
-            </div>
-            <div className="paylive__grid">
-              <div className="paylive__cell">
-                <div className="kpi__label">Guarantor fees collected (gross)</div>
-                <div className="paylive__val">{gbpExact(pay.feesGross)}</div>
-              </div>
-              <div className="paylive__cell">
-                <div className="kpi__label">Less refunds{pay.refundCount ? ` (${pay.refundCount})` : ''}</div>
-                <div className="paylive__val paylive__val--neg">{pay.refundValue ? `- ${gbpExact(pay.refundValue)}` : gbpExact(0)}</div>
-              </div>
-              <div className="paylive__cell">
-                <div className="kpi__label">Net fees</div>
-                <div className="paylive__val">{gbpExact(pay.feesNet)}</div>
-              </div>
-            </div>
-            <div className="paylive__grid" style={{ marginTop: 12 }}>
-              <div className="paylive__cell">
-                <div className="kpi__label">Partner commission ({Math.round(payRates.partner * 100)}%, net of refunds)</div>
-                <div className="paylive__val">{gbpExact(partnerCommNet)}</div>
-              </div>
-              <div className="paylive__cell">
-                <div className="kpi__label">Agent commission ({Math.round(payRates.agent * 100)}%, net of refunds)</div>
-                <div className="paylive__val">{gbpExact(agentCommNet)}</div>
-              </div>
-              <div className="paylive__cell">
-                <div className="kpi__label">Commission excluded (refunded fees)</div>
-                <div className="paylive__val paylive__val--neg">{partnerCommExcl + agentCommExcl ? `- ${gbpExact(partnerCommExcl + agentCommExcl)}` : gbpExact(0)}</div>
-                <div className="muted" style={{ fontSize: 11, marginTop: 4 }}>Partner {gbpExact(partnerCommExcl)} · Agent {gbpExact(agentCommExcl)}</div>
-              </div>
-            </div>
-          </section>
+              {settlement.partners.map((p) => (
+                <div key={p.partner} className="settle__partner">
+                  <div className="settle__row">
+                    <span>Commission payable to <b>{p.partnerName}</b> on <b>{settleDate}</b></span>
+                    <span className="settle__amt">{gbpExact(p.commission)}</span>
+                  </div>
+                  <div className="settle__apps">
+                    <table>
+                      <thead>
+                        <tr><th>Reference</th><th>Branch</th><th className="num">Paid</th><th className="num">Fee</th><th className="num">Commission</th></tr>
+                      </thead>
+                      <tbody>
+                        {p.apps.map((ap) => (
+                          <tr key={ap.ref}>
+                            <td>{ap.ref}</td>
+                            <td>{ap.branch}{ap.agency ? ` · ${ap.agency}` : ''}</td>
+                            <td className="num">{dmyShort(ap.paidAt)}</td>
+                            <td className="num">{gbpExact(ap.rent)}</td>
+                            <td className="num">{gbpExact(ap.commission)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              ))}
+            </section>
+          </RoleOnly>
         )}
 
         {/* CHARTS */}
@@ -424,12 +451,12 @@ export function Dashboard() {
           </div>
           <div className="card smetric">
             <div className="kpi__label">Avg. time Sent → Payment</div>
-            <div className="kpi__value" style={{ marginTop: 10 }}>4.2 <span className="unit">days</span></div>
+            <div className="kpi__value" style={{ marginTop: 10 }}>{d.avgSentToPaid} <span className="unit">days</span></div>
             <div className="muted" style={{ fontSize: 12.5, marginTop: 6 }}>From referral sent to fee paid</div>
           </div>
           <div className="card smetric">
             <div className="kpi__label">Avg. time Payment → Deed</div>
-            <div className="kpi__value" style={{ marginTop: 10 }}>1.8 <span className="unit">days</span></div>
+            <div className="kpi__value" style={{ marginTop: 10 }}>{d.avgPaidToDeed} <span className="unit">days</span></div>
             <div className="muted" style={{ fontSize: 12.5, marginTop: 6 }}>From fee paid to deed issued</div>
           </div>
           <div className="card smetric">
@@ -484,13 +511,13 @@ export function Dashboard() {
             <div className="bdx__head">
               <div>
                 <div className="bdx__title">Monthly bordereau</div>
-                <div className="bdx__sub">Underwriter export (C&amp;C format) with full tenant details, for one calendar month by issue date. opndoor admin only.</div>
+                <div className="bdx__sub">Underwriter export (C&amp;C format) with full tenant details, for one calendar month by tenancy start date. opndoor admin only.</div>
               </div>
               <button className="bdx__close" aria-label="Close" onClick={() => setBdxOpen(false)}><Icon name="x" /></button>
             </div>
             <div className="bdx__body">
               <div className="field">
-                <label htmlFor="bdx-month">Month (by guarantee issue date)</label>
+                <label htmlFor="bdx-month">Month (by tenancy start date)</label>
                 <input type="month" id="bdx-month" min="2024-09" max="2026-12" value={bdxMonth} onChange={(e) => setBdxMonth(e.target.value)} />
               </div>
               <div className="field">
