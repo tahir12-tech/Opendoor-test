@@ -355,6 +355,26 @@ export function ApplicationDetail() {
     toast(`Deed of Guarantee sent to ${c.name} at ${c.email}.`);
   }
 
+  // Honest not-found: the reference does not exist or is not accessible to this
+  // viewer (RLS returned nothing). Never substitute another of their records.
+  if (d.notFound) {
+    return (
+      <>
+        <div className="backbar">
+          <Link to="/applications"><Icon name="arrowLeft" /> All applications</Link>
+        </div>
+        <div className="notfound">
+          <span className="notfound__ic"><Icon name="alert" strokeWidth={2} /></span>
+          <h1 className="notfound__title">Application not found</h1>
+          <p className="notfound__sub">
+            {ref ? <>We couldn&rsquo;t find <b>{ref}</b>, or it isn&rsquo;t part of your portfolio.</> : <>No application reference was given.</>}
+          </p>
+          <Button to="/applications" variant="primary"><Icon name="arrowLeft" /> Back to applications</Button>
+        </div>
+      </>
+    );
+  }
+
   return (
     <>
       <div className="backbar">
@@ -445,8 +465,14 @@ export function ApplicationDetail() {
                   <>
                     <div className="pay-state pay-state--paid"><span className="pay-dot" />Paid</div>
                     <div className="drow"><span className="drow__k">Paid on</span><span className="drow__v">{pi.paidAt ? fmtInput(new Date(pi.paidAt)) : '—'}</span></div>
-                    <div className="drow"><span className="drow__k">Amount</span><span className="drow__v"><b>£{(pi.paidAmount ?? 0).toLocaleString('en-GB')}</b></span></div>
-                    <div className="drow"><span className="drow__k">Stripe reference</span><span className="drow__v pay-mono">{pi.paymentRef ?? '—'}</span></div>
+                    {/* Seeded/test records carry no Stripe data: show the fee from the
+                        application (one month's rent) and an honest provenance note
+                        rather than a misleading £0 / "—". */}
+                    <div className="drow"><span className="drow__k">Amount</span><span className="drow__v"><b>£{(pi.paidAmount ?? d.rentNum).toLocaleString('en-GB')}</b></span></div>
+                    <div className="drow"><span className="drow__k">Stripe reference</span><span className="drow__v pay-mono">{pi.paymentRef ?? 'Seeded test record'}</span></div>
+                    {pi.paymentRef == null && (
+                      <div className="pay-note">Seeded/test record: no Stripe payment reference. The amount shown is the guarantor fee (one month&rsquo;s rent) recorded against the application.</div>
+                    )}
                   </>
                 )}
                 {payRefunded && (

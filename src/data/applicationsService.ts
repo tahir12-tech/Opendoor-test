@@ -93,7 +93,8 @@ export interface AppScopeOpts {
 }
 
 export interface AppFilterOpts extends AppScopeOpts {
-  status?: Status | 'all';
+  /** 'refunded' is a cross-cut of Paid (status stays Paid by design). */
+  status?: Status | 'all' | 'refunded';
   agency?: string;
   branch?: string;
   q?: string;
@@ -108,11 +109,14 @@ function scopedSet(opts: AppScopeOpts): ApplicationSummary[] {
   return set;
 }
 
-export function countByStatus(opts: AppScopeOpts): { all: number; sent: number; paid: number; deed: number } {
+export function countByStatus(opts: AppScopeOpts): { all: number; sent: number; paid: number; deed: number; refunded: number } {
   const set = scopedSet(opts);
-  const counts = { all: set.length, sent: 0, paid: 0, deed: 0 };
+  // 'refunded' overlaps 'paid' (a refunded fee keeps status Paid by design), so
+  // it is counted in addition to paid, not instead of it. all = sent+paid+deed.
+  const counts = { all: set.length, sent: 0, paid: 0, deed: 0, refunded: 0 };
   set.forEach((r) => {
     counts[r.status]++;
+    if (r.refunded) counts.refunded++;
   });
   return counts;
 }
@@ -122,7 +126,8 @@ export function getApplications(opts: AppFilterOpts): ApplicationSummary[] {
   let rows = scopedSet(opts);
   if (opts.partner) rows = rows.filter((r) => r.partner === opts.partner);
   rows = rows.filter((r) => {
-    if (opts.status && opts.status !== 'all' && r.status !== opts.status) return false;
+    if (opts.status === 'refunded') { if (!r.refunded) return false; }
+    else if (opts.status && opts.status !== 'all' && r.status !== opts.status) return false;
     if (opts.branch && r.branch !== opts.branch) return false;
     if (opts.agency && r.agency !== opts.agency) return false;
     if (opts.q) {
@@ -225,8 +230,26 @@ export function findRecord(ref: string | null): AppRecord | null {
   return RECORDS.find((r) => r.ref === ref) ?? null;
 }
 
+/** A safe, blank detail flagged not-found, so the detail page can render an
+    honest "not accessible" state without ever substituting another record. */
+function notFoundDetail(ref: string): ApplicationDetail {
+  const now = new Date();
+  return {
+    ref, status: 'sent', statusLabel: '', name: '', initials: '', title: '', role: '', fullName: '',
+    dob: '', email: '', phone: '', addr1: '', addr2: '', city: '', county: '', postcode: '',
+    agency: '', branch: '', agentAddr: '', rent: '', rentNum: 0, referrer: '',
+    tenancyStart: '', tenancyStartDate: now, sentAt: now, paidAt: null, deedAt: null,
+    sentStr: '', paidStr: null, deedStr: null, issue: null, expiry: null, annual: '',
+    paymentDate: null, owner: 0, notFound: true,
+  };
+}
+
 export function getApplicationDetail(ref: string | null): ApplicationDetail {
-  const r = findRecord(ref) || RECORDS[0];
+  // No silent substitution: a reference that does not exist or is not accessible
+  // to the viewer (RLS returned nothing in live mode) yields an honest not-found
+  // detail rather than another of the viewer's own records.
+  const r = findRecord(ref);
+  if (!r) return notFoundDetail(ref ?? '');
   const idx = RECORDS.indexOf(r);
 
   // A Supabase-hydrated record carries the real Sent timestamp; when present we

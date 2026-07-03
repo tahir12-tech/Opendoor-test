@@ -271,7 +271,8 @@ function buildLivePerformanceDoc(role: Role, period: Period): BrandedExport {
     } else {
       blocks.push({
         kind: 'keyvalue',
-        items: st.partners.map((p) => ({ label: `Commission payable to ${p.partnerName}`, value: p.commission, type: 'money' as const })),
+        // Pence throughout the settlement (money-reconciliation surface).
+        items: st.partners.map((p) => ({ label: `Commission payable to ${p.partnerName}`, value: p.commission, type: 'money2' as const })),
       });
       blocks.push({
         kind: 'table',
@@ -281,8 +282,8 @@ function buildLivePerformanceDoc(role: Role, period: Period): BrandedExport {
           { header: 'Branch', type: 'text' },
           { header: 'Agency', type: 'text' },
           { header: 'Paid date', type: 'text' },
-          { header: 'Guarantor fee', type: 'money' },
-          { header: 'Partner commission', type: 'money' },
+          { header: 'Guarantor fee', type: 'money2' },
+          { header: 'Partner commission', type: 'money2' },
         ],
         rows: st.partners.flatMap((p) => p.apps.map((ap) => [p.partnerName, ap.ref, ap.branch, ap.agency, dmy(ap.paidAt), ap.rent, ap.commission] as TableRow)),
       });

@@ -32,6 +32,7 @@ const FONT_BODY = 'Manrope'; // data rows
 /* ---- number formats ---- */
 const FMT_INT = '#,##0';
 const FMT_MONEY = '"£"#,##0';
+const FMT_MONEY2 = '"£"#,##0.00'; // pence, for money-reconciliation surfaces (settlement)
 const FMT_PCT = '0%';
 
 type Style = Record<string, unknown>;
@@ -60,14 +61,14 @@ function nCell(v: number, fmt: string): XCell {
   return { v: Number.isFinite(v) ? v : 0, t: 'n', s: numStyle(fmt) };
 }
 function fmtFor(type: ColType): string {
-  return type === 'money' ? FMT_MONEY : type === 'pct' ? FMT_PCT : FMT_INT;
+  return type === 'money' ? FMT_MONEY : type === 'money2' ? FMT_MONEY2 : type === 'pct' ? FMT_PCT : FMT_INT;
 }
 function defaultWidth(type: ColType): number {
-  return type === 'text' ? 22 : type === 'money' ? 16 : 12;
+  return type === 'text' ? 22 : type === 'money' || type === 'money2' ? 16 : 12;
 }
 
 /* ---- declarative document model (shared by all exports) ---- */
-export type ColType = 'text' | 'int' | 'money' | 'pct';
+export type ColType = 'text' | 'int' | 'money' | 'money2' | 'pct';
 export interface Column {
   header: string;
   type: ColType;

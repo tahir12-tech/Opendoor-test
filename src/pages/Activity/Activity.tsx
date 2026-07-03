@@ -8,9 +8,9 @@
    expiry-reminders Edge Function (pg_cron, 08:00 Europe/London); opndoor admin can
    run that job now in test mode here. See supabase/EXPIRY-REMINDERS.md.
    ===================================================================== */
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
-import { getActivity, getAwaitingSignature, getUpcomingExpiries, runExpiryReminders, type ActivityKind, type ExpiryBand } from '@/data';
+import { getActivity, getActivityFeed, getAwaitingSignature, getUpcomingExpiries, runExpiryReminders, type ActivityFeedItem, type ActivityKind, type ExpiryBand } from '@/data';
 import { useSession } from '@/session/SessionContext';
 import { SUPABASE_ENABLED, sb } from '@/lib/supabase';
 import { hydrateFromSupabase } from '@/lib/hydrate';
@@ -26,6 +26,8 @@ import './Activity.css';
 
 const FEED_PAGE_SIZE = 20;
 const dmy = (d: Date) => `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}/${d.getFullYear()}`;
+// dd/mm/yyyy · HH:mm — used for real, activity_log-sourced events.
+const dmyTime = (d: Date) => `${dmy(d)} · ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
 
 const KIND_DOT: Record<ActivityKind, string> = { sent: 'var(--sent)', paid: 'var(--paid)', deed: 'var(--deed)' };
 const BAND_PILL: Record<ExpiryBand, PillVariant> = { soon: 'danger', warn: 'warn', notice: 'sent', later: 'muted' };
@@ -35,6 +37,30 @@ function activityText(kind: ActivityKind, tenant: string) {
   if (kind === 'deed') return <>Deed of Guarantee issued for <b>{tenant}</b></>;
   return <>Referral sent for <b>{tenant}</b></>;
 }
+
+// Live feed (activity_log) label + dot per raw kind, tenant-inclusive.
+function feedText(kind: string, tenant: string) {
+  const t = <b>{tenant}</b>;
+  switch (kind) {
+    case 'payment_received': return <>Guarantor fee paid for {t}</>;
+    case 'refunded': return <>Guarantor fee refunded for {t}</>;
+    case 'deed_sent': return <>Deed sent to {t} for signature</>;
+    case 'deed_viewed': return <>Deed viewed by {t}</>;
+    case 'deed_signed': return <>Deed signed by {t}</>;
+    case 'deed_issued': return <>Deed of Guarantee issued for {t}</>;
+    case 'deed_regenerated': return <>Deed regenerated for {t}</>;
+    case 'deed_reissued': return <>Deed reissued for {t}</>;
+    case 'tenancy_amended': return <>Tenancy start amended for {t}</>;
+    default: return <>Referral sent for {t}</>; // referral_created
+  }
+}
+function feedDot(kind: string): string {
+  if (kind === 'payment_received') return 'var(--paid)';
+  if (kind === 'refunded') return 'var(--danger, #d64545)';
+  if (kind === 'deed_signed' || kind === 'deed_issued' || kind === 'deed_reissued' || kind === 'deed_regenerated') return 'var(--deed)';
+  return 'var(--sent)'; // referral_created, deed_sent, deed_viewed, tenancy_amended
+}
+interface FeedRow { id: string; ref: string; dot: string; text: ReactNode; meta: string; }
 function untilText(daysUntil: number): string {
   if (daysUntil <= 0) return 'expires today';
   if (daysUntil === 1) return 'expires tomorrow';
@@ -45,21 +71,36 @@ export function Activity() {
   usePageMeta('activity', 'Activity', ['Home', 'Activity']);
   const { role, partnerScope } = useSession();
   const toast = useToast();
-  const [, forceRefresh] = useState(0);
+  const [refreshTick, forceRefresh] = useState(0);
   const [running, setRunning] = useState(false);
 
-  const feed = getActivity({ role, scope: partnerScope });
   const expiries = getUpcomingExpiries({ role, scope: partnerScope });
   const awaitingSig = getAwaitingSignature(role, partnerScope);
+
+  // Live mode: the "Recent activity" feed comes from the canonical activity_log
+  // (real timestamps), RLS-scoped. Mock mode keeps the deterministic derived feed.
+  const [liveFeed, setLiveFeed] = useState<ActivityFeedItem[] | null>(null);
+  useEffect(() => {
+    if (!SUPABASE_ENABLED) return;
+    let cancelled = false;
+    setLiveFeed(null); // show a loading state, never a stale/false-empty feed
+    getActivityFeed({ role, scope: partnerScope }).then((f) => { if (!cancelled) setLiveFeed(f); }).catch(() => { if (!cancelled) setLiveFeed([]); });
+    return () => { cancelled = true; };
+  }, [role, partnerScope, refreshTick]);
+
+  const feedLoading = SUPABASE_ENABLED && liveFeed === null;
+  const feedRows: FeedRow[] = SUPABASE_ENABLED
+    ? (liveFeed ?? []).map((f) => ({ id: f.id, ref: f.ref, dot: feedDot(f.kind), text: feedText(f.kind, f.tenant), meta: `${f.ref} · ${f.branch} · ${dmyTime(f.at)}` }))
+    : getActivity({ role, scope: partnerScope }).map((a) => ({ id: a.id, ref: a.ref, dot: KIND_DOT[a.kind], text: activityText(a.kind, a.tenant), meta: `${a.ref} · ${a.branch} · ${dmy(a.at)}` }));
 
   // Feed pagination. Reset to page 1 when the scope changes.
   const [feedPage, setFeedPage] = useState(1);
   useEffect(() => {
     setFeedPage(1);
   }, [role, partnerScope]);
-  const feedPageCount = Math.max(1, Math.ceil(feed.length / FEED_PAGE_SIZE));
+  const feedPageCount = Math.max(1, Math.ceil(feedRows.length / FEED_PAGE_SIZE));
   const safeFeedPage = Math.min(feedPage, feedPageCount);
-  const pagedFeed = feed.slice((safeFeedPage - 1) * FEED_PAGE_SIZE, safeFeedPage * FEED_PAGE_SIZE);
+  const pagedFeed = feedRows.slice((safeFeedPage - 1) * FEED_PAGE_SIZE, safeFeedPage * FEED_PAGE_SIZE);
 
   // opndoor admin: run the expiry-reminder job now (test mode) and refresh.
   async function runReminders() {
@@ -172,20 +213,22 @@ export function Activity() {
       <Card>
         <CardHead title="Recent activity" sub="Referrals sent, fees paid and deeds issued, most recent first." />
         <CardBody style={{ paddingTop: 8, paddingBottom: 8 }}>
-          {feed.length === 0 ? (
+          {feedLoading ? (
+            <div className="act-empty">Loading activity…</div>
+          ) : feedRows.length === 0 ? (
             <div className="act-empty">No activity yet in your scope.</div>
           ) : (
             pagedFeed.map((a) => (
               <Link className="act-item" to={`/applications/${encodeURIComponent(a.ref)}`} key={a.id}>
-                <span className="act-item__dot" style={{ background: KIND_DOT[a.kind] }} />
+                <span className="act-item__dot" style={{ background: a.dot }} />
                 <div>
-                  <div className="act-item__t">{activityText(a.kind, a.tenant)}</div>
-                  <div className="act-item__meta">{a.ref} · {a.branch} · {dmy(a.at)}</div>
+                  <div className="act-item__t">{a.text}</div>
+                  <div className="act-item__meta">{a.meta}</div>
                 </div>
               </Link>
             ))
           )}
-          <Pager page={safeFeedPage} pageSize={FEED_PAGE_SIZE} total={feed.length} onPage={setFeedPage} noun="events" />
+          {!feedLoading && <Pager page={safeFeedPage} pageSize={FEED_PAGE_SIZE} total={feedRows.length} onPage={setFeedPage} noun="events" />}
         </CardBody>
       </Card>
     </>

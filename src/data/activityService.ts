@@ -172,13 +172,72 @@ function notifLabel(kind: string, tenant: string): { text: string; dot: Notifica
  */
 export async function getNotifications(): Promise<NotificationItem[]> {
   if (!SUPABASE_ENABLED) return DEMO_NOTIFICATIONS;
+  // Fetch a wider window than we show so that collapsing repeat events (e.g. a
+  // deed regenerated several times) still leaves a full panel of distinct items.
   const { data, error } = await sb()
     .from('activity_log')
     .select('kind, at, application:applications!inner(guarantee_ref, tenant_first_name, tenant_last_name)')
     .eq('visibility', 'business')
     .in('kind', NOTIF_KINDS)
     .order('at', { ascending: false })
-    .limit(8);
+    .limit(40);
+  if (error || !data) return [];
+  const out: NotificationItem[] = [];
+  let prevKey = '';
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  for (const row of data as any[]) {
+    const app = row.application;
+    if (!app?.guarantee_ref) continue;
+    // Collapse consecutive same-kind entries for the same application to the
+    // latest (rows are newest-first, so the first occurrence is the one kept).
+    const key = `${app.guarantee_ref}:${row.kind}`;
+    if (key === prevKey) continue;
+    prevKey = key;
+    const tenant = `${app.tenant_first_name ?? ''} ${app.tenant_last_name ?? ''}`.trim() || app.guarantee_ref;
+    const { text, dot } = notifLabel(row.kind, tenant);
+    out.push({ ref: app.guarantee_ref, text, dot, time: relTime(new Date(row.at)) });
+    if (out.length >= 8) break;
+  }
+  return out;
+}
+
+/* ---------- Activity page feed (live: sourced from activity_log) ---------- */
+
+export interface ActivityFeedItem {
+  id: string;
+  ref: string;
+  tenant: string;
+  branch: string;
+  agency: string;
+  /** Raw activity_log kind (the page maps it to a label + dot). */
+  kind: string;
+  /** The real event timestamp. */
+  at: Date;
+}
+
+// Business milestones shown on the Activity page. Lower-signal internal/system
+// noise (email sends, reminders, raw failures) is intentionally excluded here.
+const FEED_KINDS = [
+  'referral_created', 'payment_received', 'refunded',
+  'deed_sent', 'deed_viewed', 'deed_signed', 'deed_issued',
+  'deed_regenerated', 'deed_reissued', 'tenancy_amended',
+];
+
+/**
+ * Live activity feed for the Activity page, sourced from the same canonical
+ * activity_log as the detail-page feed, with the real timestamp on every row.
+ * RLS scopes it to the viewer (own referrals / partner / all); only
+ * business-visibility milestones are returned. Newest first. No derived dates.
+ */
+export async function getActivityFeed(opts: ActivityScope): Promise<ActivityFeedItem[]> {
+  void opts; // scope is enforced by RLS, not re-applied here
+  const { data, error } = await sb()
+    .from('activity_log')
+    .select('id, kind, at, application:applications!inner(guarantee_ref, tenant_first_name, tenant_last_name, branch:branches(name), agency:agencies(name))')
+    .eq('visibility', 'business')
+    .in('kind', FEED_KINDS)
+    .order('at', { ascending: false })
+    .limit(200);
   if (error || !data) return [];
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   return (data as any[])
@@ -186,8 +245,12 @@ export async function getNotifications(): Promise<NotificationItem[]> {
       const app = row.application;
       if (!app?.guarantee_ref) return null;
       const tenant = `${app.tenant_first_name ?? ''} ${app.tenant_last_name ?? ''}`.trim() || app.guarantee_ref;
-      const { text, dot } = notifLabel(row.kind, tenant);
-      return { ref: app.guarantee_ref, text, dot, time: relTime(new Date(row.at)) } as NotificationItem;
+      const emb = (x: unknown) => (Array.isArray(x) ? x[0] : x) as { name?: string } | null;
+      return {
+        id: row.id, ref: app.guarantee_ref, tenant,
+        branch: emb(app.branch)?.name ?? '', agency: emb(app.agency)?.name ?? '',
+        kind: row.kind, at: new Date(row.at),
+      } as ActivityFeedItem;
     })
-    .filter((n): n is NotificationItem => n !== null);
+    .filter((n): n is ActivityFeedItem => n !== null);
 }

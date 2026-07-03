@@ -80,7 +80,10 @@ export function Dashboard() {
   // accrual, net of refunds), payable on the 15th. Live mode only; ignores the
   // period filter (it is a fixed monthly settlement question).
   const settlement = useMemo(() => getCommissionSettlement(role, partnerScope), [role, partnerScope]);
-  const gbpExact = (n: number) => `£${Math.round(n).toLocaleString('en-GB')}`;
+  // Settlement is a money-reconciliation surface: show pence on every row and the
+  // total so the rows always sum to the stated total (commission is rent x rate,
+  // which is frequently a half-pound).
+  const gbpPence = (n: number) => `£${n.toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
   const settleDate = `${settlement.settlementDate.getDate()} ${settlement.settlementDate.toLocaleDateString('en-GB', { month: 'long' })} ${settlement.settlementDate.getFullYear()}`;
   const dmyShort = (x: Date) => `${String(x.getDate()).padStart(2, '0')}/${String(x.getMonth() + 1).padStart(2, '0')}/${x.getFullYear()}`;
 
@@ -346,7 +349,7 @@ export function Dashboard() {
                 <div key={p.partner} className="settle__partner">
                   <div className="settle__row">
                     <span>Commission payable to <b>{p.partnerName}</b> on <b>{settleDate}</b></span>
-                    <span className="settle__amt">{gbpExact(p.commission)}</span>
+                    <span className="settle__amt">{gbpPence(p.commission)}</span>
                   </div>
                   <div className="settle__apps">
                     <table>
@@ -359,8 +362,8 @@ export function Dashboard() {
                             <td>{ap.ref}</td>
                             <td>{ap.branch}{ap.agency ? ` · ${ap.agency}` : ''}</td>
                             <td className="num">{dmyShort(ap.paidAt)}</td>
-                            <td className="num">{gbpExact(ap.rent)}</td>
-                            <td className="num">{gbpExact(ap.commission)}</td>
+                            <td className="num">{gbpPence(ap.rent)}</td>
+                            <td className="num">{gbpPence(ap.commission)}</td>
                           </tr>
                         ))}
                       </tbody>

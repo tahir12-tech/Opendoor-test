@@ -42,13 +42,13 @@ export function Applications() {
   const [params] = useSearchParams();
 
   // Initial filters from the drill-through URL (?agency= / ?branch=).
-  const [status, setStatus] = useState<Status | 'all'>('all');
+  // 'refunded' is a status chip that cross-cuts Paid (status stays Paid by design).
+  const [status, setStatus] = useState<Status | 'all' | 'refunded'>('all');
   const [q, setQ] = useState('');
   const [sort, setSort] = useState('Newest first');
   const [partner, setPartner] = useState('');
   const [agency, setAgency] = useState(() => params.get('agency') || (params.get('branch') ? agencyOfBranch(params.get('branch')!) : ''));
   const [branch, setBranch] = useState(() => params.get('branch') || '');
-  const [refundedOnly, setRefundedOnly] = useState(false);
 
   // Reset partner/agency/branch when the role changes (partner isolation), skipping first run.
   const firstRole = useRef(true);
@@ -65,20 +65,18 @@ export function Applications() {
   const scopeOpts = { role, scope: partnerScope, partner: partner || undefined };
   const counts = countByStatus(scopeOpts);
   const total = counts.all;
-  const rows = useMemo(
+  const visibleRows = useMemo(
     () => getApplications({ ...scopeOpts, status, agency: agency || undefined, branch: branch || undefined, q, sort }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [role, partnerScope, partner, status, agency, branch, q, sort],
   );
-  const refundedCount = useMemo(() => rows.filter((r) => r.refunded).length, [rows]);
-  const visibleRows = refundedOnly ? rows.filter((r) => r.refunded) : rows;
 
   // Pagination. Reset to the first page whenever the filtered set changes, and
   // clamp if the current page fell off the end (e.g. after narrowing filters).
   const [page, setPage] = useState(1);
   useEffect(() => {
     setPage(1);
-  }, [role, partnerScope, partner, status, agency, branch, q, sort, refundedOnly]);
+  }, [role, partnerScope, partner, status, agency, branch, q, sort]);
   const pageCount = Math.max(1, Math.ceil(visibleRows.length / PAGE_SIZE));
   const safePage = Math.min(page, pageCount);
   const pagedRows = visibleRows.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE);
@@ -92,6 +90,9 @@ export function Applications() {
     { id: 'sent', label: <Pill variant="sent" style={{ background: 'none', padding: 0 }}>Sent</Pill>, count: counts.sent },
     { id: 'paid', label: <Pill variant="paid" style={{ background: 'none', padding: 0 }}>Paid</Pill>, count: counts.paid },
     { id: 'deed', label: <Pill variant="deed" style={{ background: 'none', padding: 0 }}>Deed Issued</Pill>, count: counts.deed },
+    // Refunded cross-cuts Paid (the fee was refunded; status stays Paid). Counted
+    // separately, so All still equals Sent + Paid + Deed, not their sum plus this.
+    { id: 'refunded', label: <Pill variant="danger" style={{ background: 'none', padding: 0 }}>Refunded</Pill>, count: counts.refunded },
   ];
 
   const activeFilter = branch
@@ -132,7 +133,7 @@ export function Applications() {
       )}
 
       <div className="toolbar">
-        <FilterTabs tabs={tabs} active={status} onChange={(id) => setStatus(id as Status | 'all')} />
+        <FilterTabs tabs={tabs} active={status} onChange={(id) => setStatus(id as Status | 'all' | 'refunded')} />
       </div>
 
       <div className="toolbar">
@@ -172,16 +173,6 @@ export function Applications() {
               <option>Rent: high to low</option>
             </select>
           </span>
-          {refundedCount > 0 && (
-            <button
-              type="button"
-              className={`fchip fchip--toggle${refundedOnly ? ' is-on' : ''}`}
-              onClick={() => setRefundedOnly((v) => !v)}
-              title="Show only refunded applications"
-            >
-              <span className="refund-dot" />Refunded only{refundedOnly ? '' : ` (${refundedCount})`}
-            </button>
-          )}
         </div>
         <span className="countline">Showing <b>{visibleRows.length}</b> of <b>{total}</b></span>
       </div>

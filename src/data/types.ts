@@ -154,6 +154,10 @@ export interface ApplicationDetail {
   paymentDate: Date | null;
   /** 1 when the signed-in demo referrer owns this referral (for amend scoping). */
   owner: number;
+  /** True when the requested reference does not exist or is not accessible to
+      the viewer (RLS returned nothing). The detail page renders an honest
+      not-found state rather than substituting another record. */
+  notFound?: boolean;
 }
 
 /* ---------- Help & resources ---------- */

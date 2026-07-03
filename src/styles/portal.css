@@ -259,6 +259,13 @@ h1, h2, h3, h4 { font-family: var(--display); margin: 0; color: var(--ink); lett
 .pager__btn:hover:not(:disabled) { background: var(--app-bg-2); border-color: var(--heliotrope); }
 .pager__btn:disabled { opacity: 0.4; cursor: default; }
 .pager__btn svg { width: 15px; height: 15px; }
+
+/* Honest empty/not-found state (e.g. an inaccessible application reference) */
+.notfound { display: flex; flex-direction: column; align-items: center; text-align: center; gap: 12px; padding: 64px 24px; max-width: 460px; margin: 0 auto; }
+.notfound__ic { width: 52px; height: 52px; border-radius: 50%; display: flex; align-items: center; justify-content: center; background: var(--white-lilac); color: var(--heliotrope-deep); }
+.notfound__ic svg { width: 26px; height: 26px; }
+.notfound__title { font-size: 20px; font-weight: 700; color: var(--ink); margin: 0; }
+.notfound__sub { font-size: 14px; color: var(--ink-mute); line-height: 1.5; margin: 0 0 6px; }
 .tb-pop__foot { border-top: 1px solid var(--line); margin-top: 4px; padding: 10px 12px 6px; text-align: center; }
 .tb-pop__foot a { font-size: 13px; font-weight: 700; color: var(--heliotrope-deep); }
 .tb-pop__foot a:hover { text-decoration: underline; }

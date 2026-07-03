@@ -345,3 +345,59 @@ Verified by the proofs above.
   convenience; the database is the boundary.
 - The amend and send permission rules, and contact writes, are enforced in the
   database (C6, C7), matching `canAmendTenancyStart` / `canSendDeed`.
+
+---
+
+## Part D. `SECURITY DEFINER` function audit + linter rationale
+
+The Supabase database linter raises `authenticated_security_definer_function_executable`
+(lint 0029) for every `SECURITY DEFINER` function that signed-in (`authenticated`)
+users can call, and `extension_in_public` (0014) for `pg_net`. These are WARN-level
+and, for this project, **intentional**. This section records the audit so the next
+reviewer does not re-litigate it.
+
+### Why the definer pattern is used
+
+RLS is the boundary (Part C). A few operations must read or write rows the caller
+cannot see directly, or must run privileged helper logic, so they are `SECURITY
+DEFINER` with `search_path = ''` and re-check permission internally using
+`is_aal2()`, `app_role()`, `app_partner()`, `is_admin()` and `auth.uid()`. The
+linter cannot see those internal checks, so it flags the functions; the checks are
+what actually enforce access.
+
+### Each authenticated-executable definer function (all verified sufficient)
+
+| Function | Why authenticated-callable | Internal permission check |
+|---|---|---|
+| `app_role()`, `app_partner()`, `is_admin()` | Called **inside RLS policies**, which run as the querying user, so they must be executable by `authenticated`. | Read-only; return only the caller's own role/partner. No data exposure. |
+| `create_referral(...)` | Invoked by the `create-referral` Edge Function **as the caller** (user JWT), so RLS + field rules apply. | AAL2; inserts scoped to the caller's own branch/partner. |
+| `amend_tenancy_start(...)` | Invoked by the `amend-tenancy-start` Edge Function **as the caller** (user JWT). | AAL2 + ownership/role (`is_admin` / management-in-partner / referrer-owns) + `can_amend_tenancy_start` (C6). |
+| `send_deed_to_agent(...)` | Called **directly** by the client. | AAL2 + ownership/role + `can_send_deed`; **referrers may not pass a recipient or save a contact** (C6 recipient path), and the recipient email is format-validated. |
+| `set_application_status(...)` | Manual admin utility (real transitions run via service-role Stripe/PandaDoc RPCs). | AAL2 + **`is_admin()` only** — tightened this pass (migration `20260703143224`); management can no longer flip status by hand. |
+
+No `authenticated` EXECUTE grants needed revoking: none of the above are
+service-role-only. The genuinely service-role-only RPCs already have `authenticated`
+revoked and are granted to `service_role` only:
+`apply_stripe_payment`, `apply_stripe_refund`, `apply_deed_executed`,
+`set_deed_state`, `fire_expiry_reminders`.
+
+### `rls_enabled_no_policy` (INFO) — intentional deny-all ledgers
+
+`expiry_reminders`, `stripe_events`, `pandadoc_events` have RLS **enabled with no
+policies**. That is deliberate: RLS-on + zero-policies denies `anon`/`authenticated`
+entirely, and only `service_role` (which bypasses RLS) writes them. They are
+append-only event/idempotency ledgers with no reason to be client-readable.
+
+### `extension_in_public` — `pg_net` (WARN, deferred with rationale)
+
+`pg_net` is registered in `public`, but its **callable objects already live in a
+dedicated `net` schema** (`net.http_post`, `net.http_request_queue`), not in
+`public` — so the practical surface is already isolated. The extension is
+**not relocatable** (`pg_extension.extrelocatable = false`), so
+`ALTER EXTENSION pg_net SET SCHEMA extensions` fails. The only move is
+`DROP EXTENSION pg_net; CREATE EXTENSION pg_net WITH SCHEMA extensions;`, which
+briefly removes `net.http_post` — the function the two scheduled `cron.job`
+reminder rows call. Because the practical exposure is nil and the scheduler
+depends on it, this is **deferred to a maintenance window** rather than risked
+mid-service. Remediation, when taken, must run outside the 07:00/08:00 UTC cron
+firings and be re-verified with `select net.http_post(...)`.
