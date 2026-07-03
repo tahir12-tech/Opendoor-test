@@ -60,15 +60,27 @@ export interface FullApp {
 }
 
 let FULL: FullApp[] = [];
+let HYDRATED = false;
 
 /** Replace the full application set from the back end (Supabase mode). */
 export function hydrateFull(rows: FullApp[]): void {
   FULL = rows.slice();
+  HYDRATED = true;
 }
 
 /** The full application set (empty in mock mode). */
 export function allFull(): FullApp[] {
   return FULL;
+}
+
+/**
+ * True once the live application set has been hydrated from Supabase — even if
+ * the viewer's scope is genuinely empty. Live analytics keys on this (not on
+ * "any rows present") so a real but empty scope shows honest zeros rather than
+ * silently falling back to the synthetic mock model.
+ */
+export function isHydrated(): boolean {
+  return HYDRATED;
 }
 
 const STATUS_LABEL: Record<Status, string> = { sent: 'Sent', paid: 'Paid', deed: 'Deed Issued' };
@@ -120,10 +132,15 @@ export function getApplications(opts: AppFilterOpts): ApplicationSummary[] {
     return true;
   });
   const sort = opts.sort || 'Newest first';
+  // Sort by the anchor event time (deed/paid/sent) to the second when available,
+  // falling back to the day string; ties break by reference so the order is
+  // stable and deterministic (never dependent on fetch order).
+  const when = (r: ApplicationSummary): number => (r.eventTs != null ? r.eventTs : new Date(r.date).getTime());
   rows = rows.slice().sort((a, b) => {
-    if (sort === 'Oldest first') return a.date < b.date ? -1 : 1;
-    if (sort === 'Rent: high to low') return b.rent - a.rent;
-    return a.date > b.date ? -1 : 1;
+    if (sort === 'Rent: high to low') return b.rent - a.rent || a.ref.localeCompare(b.ref);
+    const diff = when(a) - when(b);
+    const chrono = sort === 'Oldest first' ? diff : -diff;
+    return chrono || a.ref.localeCompare(b.ref);
   });
   return rows;
 }

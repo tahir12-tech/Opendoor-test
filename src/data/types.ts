@@ -102,7 +102,13 @@ export interface ApplicationSummary {
   ben: string;
   rent: number;
   status: Status;
-  date: string; // ISO yyyy-mm-dd
+  date: string; // ISO yyyy-mm-dd (the anchor event's day, for display)
+  /**
+   * Anchor event time in epoch ms (deed issued, else paid, else sent), for a
+   * genuinely newest-first sort that is deterministic to the second. Omitted on
+   * legacy mock rows; callers fall back to `date`.
+   */
+  eventTs?: number;
   /** 1 when the demo referrer (Priya Nair) owns this referral. */
   owner: number;
   partner: string;

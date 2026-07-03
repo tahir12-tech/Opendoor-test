@@ -248,6 +248,17 @@ h1, h2, h3, h4 { font-family: var(--display); margin: 0; color: var(--ink); lett
 .tb-pop__row-t b { font-weight: 700; }
 .tb-pop__row-s { font-size: 12px; color: var(--ink-mute); margin-top: 2px; }
 .tb-pop__empty { font-size: 13px; color: var(--ink-mute); text-align: center; padding: 18px 12px; }
+
+/* Pager — list pagination (applications table, activity feed) */
+.pager { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; padding: 14px 4px 4px; }
+.pager__info { font-size: 13px; color: var(--ink-mute); }
+.pager__info b { color: var(--ink); font-weight: 600; }
+.pager__nav { display: flex; align-items: center; gap: 8px; }
+.pager__count { font-size: 12px; color: var(--ink-mute); padding: 0 4px; }
+.pager__btn { display: inline-flex; align-items: center; gap: 5px; font-size: 13px; font-weight: 600; color: var(--ink); background: #fff; border: 1px solid var(--line); border-radius: var(--r-md); padding: 7px 12px; cursor: pointer; transition: background 0.12s, border-color 0.12s; }
+.pager__btn:hover:not(:disabled) { background: var(--app-bg-2); border-color: var(--heliotrope); }
+.pager__btn:disabled { opacity: 0.4; cursor: default; }
+.pager__btn svg { width: 15px; height: 15px; }
 .tb-pop__foot { border-top: 1px solid var(--line); margin-top: 4px; padding: 10px 12px 6px; text-align: center; }
 .tb-pop__foot a { font-size: 13px; font-weight: 700; color: var(--heliotrope-deep); }
 .tb-pop__foot a:hover { text-decoration: underline; }

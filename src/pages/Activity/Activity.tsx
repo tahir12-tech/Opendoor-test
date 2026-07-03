@@ -8,7 +8,7 @@
    expiry-reminders Edge Function (pg_cron, 08:00 Europe/London); opndoor admin can
    run that job now in test mode here. See supabase/EXPIRY-REMINDERS.md.
    ===================================================================== */
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { getActivity, getAwaitingSignature, getUpcomingExpiries, runExpiryReminders, type ActivityKind, type ExpiryBand } from '@/data';
 import { useSession } from '@/session/SessionContext';
@@ -20,9 +20,11 @@ import { Card, CardBody, CardHead } from '@/components/ui/Card';
 import { Eyebrow } from '@/components/ui/Eyebrow';
 import { Icon } from '@/components/ui/Icon';
 import { Pill, type PillVariant } from '@/components/ui/Pill';
+import { Pager } from '@/components/ui/Pager';
 import { useToast } from '@/components/ui/Toast';
 import './Activity.css';
 
+const FEED_PAGE_SIZE = 20;
 const dmy = (d: Date) => `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}/${d.getFullYear()}`;
 
 const KIND_DOT: Record<ActivityKind, string> = { sent: 'var(--sent)', paid: 'var(--paid)', deed: 'var(--deed)' };
@@ -49,6 +51,15 @@ export function Activity() {
   const feed = getActivity({ role, scope: partnerScope });
   const expiries = getUpcomingExpiries({ role, scope: partnerScope });
   const awaitingSig = getAwaitingSignature(role, partnerScope);
+
+  // Feed pagination. Reset to page 1 when the scope changes.
+  const [feedPage, setFeedPage] = useState(1);
+  useEffect(() => {
+    setFeedPage(1);
+  }, [role, partnerScope]);
+  const feedPageCount = Math.max(1, Math.ceil(feed.length / FEED_PAGE_SIZE));
+  const safeFeedPage = Math.min(feedPage, feedPageCount);
+  const pagedFeed = feed.slice((safeFeedPage - 1) * FEED_PAGE_SIZE, safeFeedPage * FEED_PAGE_SIZE);
 
   // opndoor admin: run the expiry-reminder job now (test mode) and refresh.
   async function runReminders() {
@@ -164,7 +175,7 @@ export function Activity() {
           {feed.length === 0 ? (
             <div className="act-empty">No activity yet in your scope.</div>
           ) : (
-            feed.map((a) => (
+            pagedFeed.map((a) => (
               <Link className="act-item" to={`/applications/${encodeURIComponent(a.ref)}`} key={a.id}>
                 <span className="act-item__dot" style={{ background: KIND_DOT[a.kind] }} />
                 <div>
@@ -174,6 +185,7 @@ export function Activity() {
               </Link>
             ))
           )}
+          <Pager page={safeFeedPage} pageSize={FEED_PAGE_SIZE} total={feed.length} onPage={setFeedPage} noun="events" />
         </CardBody>
       </Card>
     </>

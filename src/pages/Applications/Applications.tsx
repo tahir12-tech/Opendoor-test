@@ -21,8 +21,10 @@ import { Pill, type PillVariant } from '@/components/ui/Pill';
 import { FilterTabs } from '@/components/ui/FilterTabs';
 import { RoleOnly } from '@/components/ui/RoleOnly';
 import { RoleNote } from '@/components/ui/RoleNote';
+import { Pager } from '@/components/ui/Pager';
 import './Applications.css';
 
+const PAGE_SIZE = 20;
 const STATUS_LABEL: Record<Status, string> = { sent: 'Sent', paid: 'Paid', deed: 'Deed Issued' };
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 function fmtDate(iso: string): string {
@@ -70,6 +72,16 @@ export function Applications() {
   );
   const refundedCount = useMemo(() => rows.filter((r) => r.refunded).length, [rows]);
   const visibleRows = refundedOnly ? rows.filter((r) => r.refunded) : rows;
+
+  // Pagination. Reset to the first page whenever the filtered set changes, and
+  // clamp if the current page fell off the end (e.g. after narrowing filters).
+  const [page, setPage] = useState(1);
+  useEffect(() => {
+    setPage(1);
+  }, [role, partnerScope, partner, status, agency, branch, q, sort, refundedOnly]);
+  const pageCount = Math.max(1, Math.ceil(visibleRows.length / PAGE_SIZE));
+  const safePage = Math.min(page, pageCount);
+  const pagedRows = visibleRows.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE);
 
   const agencyOptions = agencyNamesForScope(scopeOpts);
   const branchOptions = branchNamesForScope(scopeOpts, agency || undefined);
@@ -190,7 +202,7 @@ export function Applications() {
               </tr>
             </thead>
             <tbody>
-              {visibleRows.map((r) => (
+              {pagedRows.map((r) => (
                 <tr key={r.ref} onClick={() => navigate(`/applications/${encodeURIComponent(r.ref)}`)}>
                   <td>
                     <div className="who">
@@ -211,6 +223,7 @@ export function Applications() {
           </table>
         </div>
         {visibleRows.length === 0 && <div className="empty is-shown">No applications match your filters.</div>}
+        <Pager page={safePage} pageSize={PAGE_SIZE} total={visibleRows.length} onPage={setPage} noun="applications" />
       </Card>
     </>
   );

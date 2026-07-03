@@ -69,7 +69,14 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const [status, setStatus] = useState<SessionStatus>(SUPABASE_ENABLED ? 'loading' : 'ready');
   const [profile, setProfile] = useState<Profile | null>(null);
   const [authError, setAuthError] = useState<string | null>(null);
+  // Bumped once hydration completes so any background re-hydration (session
+  // refresh, a mutation's refresh()) forces consumers to re-read live data.
+  const [dataVersion, setDataVersion] = useState(0);
   const hydratedFor = useRef<string | null>(null);
+  // The single in-flight hydration for a user. Concurrent resolve() calls (mount
+  // + onAuthStateChange) await THIS promise rather than racing ahead to 'ready'
+  // while the working copies still hold mock data.
+  const hydration = useRef<{ userId: string; promise: Promise<void> } | null>(null);
 
   const setRole = useCallback((next: Role) => {
     saveString(KEYS.role, next);
@@ -125,13 +132,26 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       setProfile(prof);
       setRole(prof.role);
       if (hydratedFor.current !== userId) {
+        // Start hydration exactly once per user; concurrent resolves reuse and
+        // await the same promise. Critically, 'ready' is only set AFTER this
+        // resolves, so the app never renders the mock working copies in live mode.
+        if (hydration.current?.userId !== userId) {
+          hydration.current = { userId, promise: hydrateFromSupabase(userId) };
+        }
+        try {
+          await hydration.current.promise;
+        } catch (e) {
+          hydration.current = null; // allow a later resolve() to retry
+          throw e;
+        }
         hydratedFor.current = userId;
-        await hydrateFromSupabase(userId);
+        setDataVersion((v) => v + 1);
       }
       setAuthError(null);
       setStatus('ready');
     } catch (e) {
       hydratedFor.current = null;
+      hydration.current = null; // drop any cached promise so the next resolve() re-hydrates
       setAuthError(e instanceof Error ? e.message : 'Sign-in failed.');
       setStatus('needsMfa');
     }
@@ -149,6 +169,9 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const signOut = useCallback(async () => {
     if (SUPABASE_ENABLED) {
       hydratedFor.current = null;
+      // Drop the cached hydration promise: signing back in (even as the same
+      // user, in-page with no reload) must re-fetch, not replay a stale snapshot.
+      hydration.current = null;
       await authService.signOut();
       setProfile(null);
       setStatus('signedOut');
@@ -156,7 +179,10 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const refresh = useCallback(async () => {
-    if (SUPABASE_ENABLED && hydratedFor.current) await hydrateFromSupabase(hydratedFor.current);
+    if (SUPABASE_ENABLED && hydratedFor.current) {
+      await hydrateFromSupabase(hydratedFor.current);
+      setDataVersion((v) => v + 1); // re-read the refreshed working copies
+    }
   }, []);
 
   // Expose the role on <html> for role-scoped CSS (mirrors portal.js).
@@ -172,7 +198,9 @@ export function SessionProvider({ children }: { children: ReactNode }) {
 
   const value = useMemo<SessionValue>(
     () => ({ role, setRole, user, partnerScope, selectedPartner, setSelectedPartner, period, setPeriod, status, authError, signOut, refresh }),
-    [role, setRole, user, partnerScope, selectedPartner, setSelectedPartner, period, setPeriod, status, authError, signOut, refresh],
+    // dataVersion is intentionally a dep: bumping it after (re-)hydration changes
+    // the context identity so consumers re-read the refreshed working copies.
+    [role, setRole, user, partnerScope, selectedPartner, setSelectedPartner, period, setPeriod, status, authError, signOut, refresh, dataVersion],
   );
 
   return <SessionContext.Provider value={value}>{children}</SessionContext.Provider>;

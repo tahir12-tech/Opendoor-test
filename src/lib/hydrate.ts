@@ -45,6 +45,12 @@ function eventDate(a: any): string {
   return isoDate(a.deed_issued_at) || isoDate(a.paid_at) || isoDate(a.sent_at);
 }
 
+/** The anchor event's epoch ms (same priority as eventDate), for a precise sort. */
+function eventTs(a: any): number {
+  const ts = a.deed_issued_at || a.paid_at || a.sent_at;
+  return ts ? new Date(ts).getTime() : 0;
+}
+
 function relTime(ts: string | null, status: string): string {
   if (!ts) return status === 'pending' ? 'Pending invite' : '—';
   const diff = Date.now() - new Date(ts).getTime();
@@ -206,6 +212,7 @@ export async function hydrateFromSupabase(userId: string): Promise<void> {
     rent: num(a.monthly_rent),
     status: a.status as Status,
     date: eventDate(a),
+    eventTs: eventTs(a),
     owner: ownerFlag(a),
     partner: slugOfApp(a),
     refunded: a.payment_state === 'refunded',
