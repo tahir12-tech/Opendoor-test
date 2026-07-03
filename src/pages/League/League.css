@@ -1,0 +1,158 @@
+/* League tables styles (ported from league.html). */
+.lt-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+  margin-bottom: 18px;
+}
+.lt-search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 9px 16px;
+  width: 300px;
+  max-width: 100%;
+  box-shadow: var(--shadow-sm);
+}
+.lt-search svg {
+  width: 16px;
+  height: 16px;
+  color: var(--ink-mute);
+}
+.lt-search input {
+  border: none;
+  outline: none;
+  font-family: var(--body);
+  font-size: 13.5px;
+  color: var(--ink);
+  width: 100%;
+}
+.lt-count {
+  font-size: 13px;
+  color: var(--ink-mute);
+  margin-left: auto;
+}
+.lt-count b {
+  color: var(--ink);
+  font-weight: 700;
+}
+.dt th.sortable {
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+}
+.dt th.sortable:hover {
+  color: var(--ink);
+}
+.dt th .sort-ar {
+  opacity: 0;
+  margin-left: 4px;
+}
+.dt th.is-sort .sort-ar {
+  opacity: 1;
+}
+.dt td.num,
+.dt th.num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.rank {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 7px;
+  background: var(--app-bg);
+  color: var(--ink-mute);
+  font-family: var(--display);
+  font-weight: 700;
+  font-size: 12px;
+}
+.rank.top {
+  background: var(--white-lilac);
+  color: var(--heliotrope-deep);
+}
+.lt-name {
+  font-weight: 700;
+  color: var(--ink);
+}
+.lt-sub {
+  font-size: 12px;
+  color: var(--ink-mute);
+  margin-top: 1px;
+}
+.conv-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.conv-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--deed);
+  flex-shrink: 0;
+}
+.conv-dot.mid {
+  background: var(--warn);
+}
+.conv-dot.low {
+  background: var(--danger);
+}
+.pager {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 4px 0;
+  flex-wrap: wrap;
+}
+.pager__info {
+  font-size: 13px;
+  color: var(--ink-mute);
+}
+.pager__btns {
+  display: flex;
+  gap: 8px;
+}
+.lt-tabs {
+  display: flex;
+  gap: 4px;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 4px;
+  box-shadow: var(--shadow-sm);
+}
+.lt-tab {
+  all: unset;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--ink-soft);
+  padding: 8px 16px;
+  border-radius: 999px;
+}
+.lt-tab:hover {
+  color: var(--ink);
+}
+.lt-tab.is-active {
+  background: var(--valhalla);
+  color: #fff;
+}
+.lt-empty {
+  display: none;
+  padding: 44px;
+  text-align: center;
+  color: var(--ink-mute);
+}
+.lt-empty.is-shown {
+  display: block;
+}

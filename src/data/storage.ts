@@ -12,7 +12,7 @@
 /** Namespaced localStorage keys used by the prototype data layer. */
 export const KEYS = {
   partners: 'grp_partners_v2',
-  org: 'grp_org_v2',
+  org: 'grp_org_v3', // v3 adds agent contacts to agencies and branches
   help: 'grp_help_v7',
   role: 'grp_role',
   partner: 'grp_partner',

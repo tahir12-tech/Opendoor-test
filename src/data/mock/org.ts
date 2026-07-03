@@ -6,15 +6,19 @@
 import type { Agency } from '../types';
 
 export const ORG_SEED: Agency[] = [
-  { partner: 'rightmove', name: 'Foxglove Residential', group: 'ABC group', users: 11, referrals: 214, guaranteed: '£3.9M', fees: 385000, open: true, branches: [
-    { name: 'South Kensington', area: 'SW7', referrers: 5, referrals: 78, guaranteed: '£1.4M', fees: 165000 },
-    { name: 'Chelsea', area: 'SW3', referrers: 4, referrals: 61, guaranteed: '£1.2M', fees: 129000 },
-    { name: 'Fulham', area: 'SW6', referrers: 2, referrals: 43, guaranteed: '£0.8M', fees: 91000 },
-  ] },
-  { partner: 'rightmove', name: 'Marylebone & Co', users: 8, referrals: 152, guaranteed: '£3.1M', fees: 266000, branches: [
-    { name: 'Marylebone', area: 'W1U', referrers: 3, referrals: 72, guaranteed: '£1.6M', fees: 152000 },
-    { name: 'Fitzrovia', area: 'W1T', referrers: 3, referrals: 54, guaranteed: '£1.1M', fees: 114000 },
-  ] },
+  { partner: 'rightmove', name: 'Foxglove Residential', group: 'ABC group', users: 11, referrals: 214, guaranteed: '£3.9M', fees: 385000, open: true,
+    contacts: [{ name: 'Eleanor Whitfield', email: 'guarantees@foxglove-residential.co.uk', phone: '020 7946 1100', role: 'Lettings operations', primary: true }],
+    branches: [
+      { name: 'South Kensington', area: 'SW7', referrers: 5, referrals: 78, guaranteed: '£1.4M', fees: 165000, contacts: [{ name: 'Priya Nair', email: 'sthken@foxglove-residential.co.uk', phone: '020 7946 1120', role: 'Branch manager', primary: true }] },
+      { name: 'Chelsea', area: 'SW3', referrers: 4, referrals: 61, guaranteed: '£1.2M', fees: 129000 },
+      { name: 'Fulham', area: 'SW6', referrers: 2, referrals: 43, guaranteed: '£0.8M', fees: 91000 },
+    ] },
+  { partner: 'rightmove', name: 'Marylebone & Co', users: 8, referrals: 152, guaranteed: '£3.1M', fees: 266000,
+    contacts: [{ name: 'Daniel Wright', email: 'deeds@maryleboneandco.co.uk', phone: '020 7946 1200', role: 'Compliance', primary: true }],
+    branches: [
+      { name: 'Marylebone', area: 'W1U', referrers: 3, referrals: 72, guaranteed: '£1.6M', fees: 152000 },
+      { name: 'Fitzrovia', area: 'W1T', referrers: 3, referrals: 54, guaranteed: '£1.1M', fees: 114000 },
+    ] },
   { partner: 'rightmove', name: 'Hartwell Estates', users: 5, referrals: 96, guaranteed: '£1.8M', fees: 202000, branches: [
     { name: 'Clapham', area: 'SW11', referrers: 3, referrals: 58, guaranteed: '£1.1M', fees: 122000 },
     { name: 'Balham', area: 'SW12', referrers: 2, referrals: 38, guaranteed: '£0.7M', fees: 80000 },

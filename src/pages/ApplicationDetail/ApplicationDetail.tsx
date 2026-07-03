@@ -2,16 +2,19 @@
    Application detail — the full record for one application, data-driven by
    the :ref route param. Status timeline, tenant / property / agent /
    tenancy, guarantee summary, stored deed, activity feed, and the amend
-   tenancy-start modal (opndoor admin + Management) with its 7-day rule.
+   tenancy-start modal (opndoor admin + Management), which accepts any valid
+   date and reissues the deed.
 
    INTEGRATION: getApplicationDetail + amendTenancyStart are in
-   applicationsService; the 7-day rule and deed reissue must be enforced
-   server-side. Payment/deed generation are Stripe/PandaDoc in production.
+   applicationsService; the deed reissue must be applied server-side.
+   Payment/deed generation are Stripe/PandaDoc in production. Send-deed
+   emails a copy to the agent contact resolved by orgService.
    ===================================================================== */
-import { useMemo, useState } from 'react';
-import { Link, useParams } from 'react-router-dom';
-import { AMEND_WINDOW_DAYS, amendWindow, getApplicationDetail } from '@/data';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Link, useParams, useSearchParams } from 'react-router-dom';
+import { addContact, amendTenancyStart, amendTenancyStartDb, canAmendTenancyStart, canSendDeed, contactForApplication, deedDownloadUrl, effectiveContacts, getApplicationDetail, getPaymentInfo, pandadocSandbox, resendDeed, resendPaymentEmail, sendDeedToAgent, stripeTestMode, type PaymentInfo } from '@/data';
 import { useSession } from '@/session/SessionContext';
+import { SUPABASE_ENABLED } from '@/lib/supabase';
 import { usePageMeta } from '@/components/layout/pageMeta';
 import { Button } from '@/components/ui/Button';
 import { Icon } from '@/components/ui/Icon';
@@ -19,7 +22,6 @@ import { Card, CardBody, CardHead } from '@/components/ui/Card';
 import { Modal } from '@/components/ui/Modal';
 import { Pill } from '@/components/ui/Pill';
 import { StatusTimeline } from '@/components/ui/StatusTimeline';
-import { RoleOnly } from '@/components/ui/RoleOnly';
 import { useToast } from '@/components/ui/Toast';
 import './ApplicationDetail.css';
 
@@ -30,7 +32,6 @@ const NOW = new Date(2026, 5, 26);
 const fmtLong = (x: Date) => `${x.getDate()} ${MONTHS_LONG[x.getMonth()]} ${x.getFullYear()}`;
 const fmtShort = (x: Date) => `${String(x.getDate()).padStart(2, '0')} ${MONTHS[x.getMonth()]} ${x.getFullYear()}`;
 const fmtInput = (x: Date) => `${String(x.getDate()).padStart(2, '0')}/${String(x.getMonth() + 1).padStart(2, '0')}/${x.getFullYear()}`;
-const addYear = (x: Date) => new Date(x.getFullYear() + 1, x.getMonth(), x.getDate());
 function parseInput(s: string): Date | null {
   const m = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/.exec((s || '').trim());
   if (!m) return null;
@@ -59,6 +60,81 @@ export function ApplicationDetail() {
   const [amendOpen, setAmendOpen] = useState(false);
   const [amendInput, setAmendInput] = useState('');
 
+  // send-deed-to-agent
+  const [sendOpen, setSendOpen] = useState(false);
+  const [sendSel, setSendSel] = useState('other'); // '0','1',… (a saved contact) or 'other'
+  const [soName, setSoName] = useState('');
+  const [soRole, setSoRole] = useState('');
+  const [soEmail, setSoEmail] = useState('');
+  const [soSave, setSoSave] = useState(false);
+
+  // payment (Stripe, real mode)
+  const [searchParams] = useSearchParams();
+  const [paymentInfo, setPaymentInfo] = useState<PaymentInfo | null>(null);
+  const [resendBusy, setResendBusy] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const [deedBusy, setDeedBusy] = useState(false);
+
+  const loadPayment = useCallback(async () => {
+    if (!SUPABASE_ENABLED) return null;
+    const info = await getPaymentInfo(d.ref);
+    setPaymentInfo(info);
+    return info;
+  }, [d.ref]);
+
+  useEffect(() => {
+    if (!SUPABASE_ENABLED) return;
+    let cancelled = false;
+    let attempts = 0;
+    const justPaid = searchParams.get('paid') === '1';
+    const tick = async () => {
+      const info = await loadPayment();
+      if (cancelled) return;
+      // On return from Stripe the webhook may lag a moment; poll briefly until Paid.
+      if (justPaid && info && info.paymentState !== 'paid' && info.status === 'sent' && attempts < 5) {
+        attempts += 1;
+        setTimeout(tick, 2000);
+      }
+    };
+    void tick();
+    return () => { cancelled = true; };
+  }, [loadPayment, searchParams]);
+
+  const copyLink = async () => {
+    if (!paymentInfo?.paymentUrl) return;
+    try {
+      await navigator.clipboard.writeText(paymentInfo.paymentUrl);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+      toast('Payment link copied.');
+    } catch {
+      toast('Could not copy the link.');
+    }
+  };
+
+  const doResend = async () => {
+    setResendBusy(true);
+    const r = await resendPaymentEmail(d.ref);
+    setResendBusy(false);
+    if (r.ok) { toast('Payment email resent to the review address.'); void loadPayment(); }
+    else toast(r.error || 'Could not resend the email.');
+  };
+
+  const doResendDeed = async () => {
+    setDeedBusy(true);
+    const r = await resendDeed(d.ref);
+    setDeedBusy(false);
+    if (r.ok) { toast('Deed sent to the tenant for signature.'); void loadPayment(); }
+    else toast(r.error || 'Could not send the deed.');
+  };
+
+  const doDownloadDeed = async () => {
+    if (!SUPABASE_ENABLED) return;
+    const r = await deedDownloadUrl(d.ref);
+    if (r.ok && r.url) window.open(r.url, '_blank', 'noopener');
+    else toast(r.error || 'Could not open the deed.');
+  };
+
   const reached = d.status === 'sent' ? 1 : d.status === 'paid' ? 2 : 3;
   const steps = [
     { label: 'Sent', date: d.sentStr, note: `Referral sent to tenant by ${d.referrer}` },
@@ -77,47 +153,133 @@ export function ApplicationDetail() {
   if (d.deedStr) baseActivity.push({ color: 'var(--deed)', text: 'Deed issued and stored against the record', time: `${d.deedStr} · System` });
   if (d.paidStr) baseActivity.push({ color: 'var(--paid)', text: 'Guarantor fee paid by tenant', time: `${d.paidStr} · System` });
   baseActivity.push({ color: 'var(--sent)', text: 'Application sent to tenant', time: `${d.sentStr} · ${d.referrer}` });
-  const activity = [...extraActivity, ...baseActivity];
+  // Persisted payment activity (real mode): referral created, email sent/resent, paid, refunded.
+  const logItems: Activity[] = (paymentInfo?.log ?? []).map((l) => ({
+    color: l.kind === 'payment_received' ? 'var(--paid)' : l.kind === 'refunded' || l.kind === 'payment_email_failed' ? 'var(--danger, #d64545)' : 'var(--heliotrope)',
+    text: l.message,
+    time: `${fmtInput(new Date(l.at))} · ${l.actor ?? 'System'}`,
+  }));
+  const activity = [...logItems, ...extraActivity, ...baseActivity];
+
+  // ---- payment display (Stripe, real mode) ----
+  const pi = paymentInfo;
+  const payRefunded = pi?.paymentState === 'refunded';
+  const payPaid = !!pi && !payRefunded && (pi.paymentState === 'paid' || pi.status !== 'sent');
+  const payAwaiting = !!pi && !payPaid && !payRefunded;
+  const lastEmailLog = pi?.log.find((l) => l.kind.startsWith('payment_email'));
+
+  // ---- amend permission + context ----
+  const PAYMENT = d.paymentDate;
+  // Before payment (Sent) amending just corrects data; after payment it reissues the deed.
+  const reissues = d.status !== 'sent';
+  // Who may amend: Sent -> any viewing role (Referrer only their own); Paid/Deed -> Management + opndoor admin.
+  const canAmend = canAmendTenancyStart(role, d.status, d.owner === 1);
 
   // ---- amend validation ----
-  const PAYMENT = d.paymentDate;
-  const win = PAYMENT ? amendWindow(PAYMENT) : null;
+  // Any valid calendar date is allowed. We only require a real dd/mm/yyyy date
+  // that differs from the current start; there is no payment-window restriction.
   const parsed = parseInput(amendInput);
   let amendTone: 'ok' | 'err' | 'neutral' = 'err';
   let amendText = 'Enter a valid date as dd/mm/yyyy';
   let canSave = false;
-  if (parsed && win) {
-    if (parsed < win.start || parsed > win.end) {
-      amendText = `Must be within ${AMEND_WINDOW_DAYS} days of payment (${fmtShort(win.start)} – ${fmtShort(win.end)})`;
-    } else if (parsed.getTime() === currentStart.getTime()) {
+  if (parsed) {
+    if (parsed.getTime() === currentStart.getTime()) {
       amendTone = 'neutral';
       amendText = 'This is the current start date';
     } else {
       amendTone = 'ok';
-      amendText = 'Valid. A new deed will be issued with this date.';
+      amendText = reissues ? 'Valid. A new deed will be issued with this date.' : 'Valid. The tenancy start date will be updated.';
       canSave = true;
     }
   }
 
   function openAmend() {
-    if (!PAYMENT) return;
     setAmendInput(fmtInput(currentStart));
     setAmendOpen(true);
   }
 
-  function saveAmend() {
+  async function saveAmend() {
     if (!parsed || !canSave) return;
-    const nextVersion = deedVersion + 1;
+    try {
+      await amendTenancyStartDb(d.ref, parsed);
+    } catch (err) {
+      toast(err instanceof Error ? err.message : 'Could not amend the tenancy start date.');
+      return;
+    }
+    const result = amendTenancyStart(d.status, parsed);
     setCurrentStart(parsed);
-    setDeedVersion(nextVersion);
-    if (isDeed) setAmendedDates({ issue: fmtShort(NOW), expiry: fmtShort(addYear(parsed)) });
-    const who = role === 'superadmin' ? 'opndoor admin' : 'Management';
+    if (result.reissued) {
+      setDeedVersion((v) => v + 1);
+      if (isDeed && result.issue && result.expiry) setAmendedDates({ issue: fmtShort(result.issue), expiry: fmtShort(result.expiry) });
+    }
+    const who = role === 'superadmin' ? 'opndoor admin' : role === 'management' ? 'Management' : 'Referrer';
     setExtraActivity((prev) => [
-      { color: 'var(--heliotrope)', text: <>Tenancy start amended to <b>{fmtLong(parsed)}</b>; deed reissued</>, time: `${fmtShort(NOW)} · ${who}` },
+      {
+        color: 'var(--heliotrope)',
+        text: result.reissued ? <>Tenancy start amended to <b>{fmtLong(parsed)}</b>; deed reissued</> : <>Tenancy start amended to <b>{fmtLong(parsed)}</b></>,
+        time: `${fmtShort(NOW)} · ${who}`,
+      },
       ...prev,
     ]);
     setAmendOpen(false);
-    toast(`Tenancy start updated to ${fmtLong(parsed)}. New deed of guarantee issued.`);
+    toast(result.reissued ? `Tenancy start updated to ${fmtLong(parsed)}. New deed of guarantee issued.` : `Tenancy start updated to ${fmtLong(parsed)}.`);
+  }
+
+  // ---- send deed to agent ----
+  // Resolve the branch's effective contacts (agency default when the branch has none).
+  const resolved = contactForApplication(d.agency, d.branch);
+  const eff = effectiveContacts(resolved.agency, resolved.branch);
+  const sendSrc = eff.inherited ? `agency default for ${d.agency}` : `${d.branch} branch`;
+  const isReferrer = role === 'referrer';
+  // Who may send the issued deed: Referrers only on their own; Management + opndoor admin on any in scope.
+  const canSend = canSendDeed(role, d.owner === 1);
+  // Referrers are send-only: they can only send when a recipient is already resolved.
+  const sendDisabled = isReferrer && !resolved.contact;
+
+  function openSend() {
+    setSendSel(eff.list.length ? '0' : 'other');
+    setSoName('');
+    setSoRole('');
+    setSoEmail('');
+    setSoSave(false);
+    setSendOpen(true);
+  }
+
+  async function confirmSend() {
+    let c: { name: string; email: string; role: string } | null = null;
+    if (isReferrer) {
+      // Referrers send only to the resolved recipient: no one-off address, no saving.
+      if (resolved.contact) c = { name: resolved.contact.name, email: resolved.contact.email, role: resolved.contact.role };
+    } else if (sendSel === 'other') {
+      const name = soName.trim();
+      const email = soEmail.trim();
+      if (!name || !email) return;
+      c = { name, email, role: soRole.trim() };
+      if (soSave) {
+        // save to the branch if it exists in the store, otherwise the agency (matches the prototype)
+        const branchName = resolved.branch ? d.branch : null;
+        addContact(d.agency, branchName, { name, email, phone: '', role: c.role, primary: false });
+      }
+    } else {
+      const picked = eff.list[+sendSel];
+      if (picked) c = { name: picked.name, email: picked.email, role: picked.role };
+    }
+    if (!c) return;
+    try {
+      // The database re-checks canSendDeed; Referrers may only send to the resolved contact.
+      if (isReferrer) await sendDeedToAgent(d.ref);
+      else await sendDeedToAgent(d.ref, c.email, sendSel === 'other' ? soSave : false);
+    } catch (err) {
+      toast(err instanceof Error ? err.message : 'Could not send the deed.');
+      return;
+    }
+    const who = role === 'superadmin' ? 'opndoor admin' : role === 'management' ? 'Management' : 'Referrer';
+    setExtraActivity((prev) => [
+      { color: 'var(--heliotrope)', text: <>Deed of Guarantee sent to <b>{c!.name}</b> ({c!.email})</>, time: `${fmtShort(NOW)} · ${who}` },
+      ...prev,
+    ]);
+    setSendOpen(false);
+    toast(`Deed of Guarantee sent to ${c.name} at ${c.email}.`);
   }
 
   return (
@@ -189,11 +351,7 @@ export function ApplicationDetail() {
             <CardHead
               title="Tenancy"
               actions={
-                PAYMENT && (
-                  <RoleOnly roles={['superadmin', 'management']}>
-                    <Button variant="ghost" size="sm" onClick={openAmend}><Icon name="calendar" /> Amend start date</Button>
-                  </RoleOnly>
-                )
+                canAmend && <Button variant="ghost" size="sm" onClick={openAmend}><Icon name="calendar" /> Amend start date</Button>
               }
             />
             <CardBody style={{ paddingTop: 6, paddingBottom: 6 }}>
@@ -206,6 +364,53 @@ export function ApplicationDetail() {
 
         {/* RIGHT */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
+          {SUPABASE_ENABLED && pi && (
+            <Card>
+              <CardHead title="Payment" actions={stripeTestMode() ? <span className="pay-badge">Test mode</span> : undefined} />
+              <CardBody style={{ paddingTop: 6, paddingBottom: 12 }}>
+                {payPaid && (
+                  <>
+                    <div className="pay-state pay-state--paid"><span className="pay-dot" />Paid</div>
+                    <div className="drow"><span className="drow__k">Paid on</span><span className="drow__v">{pi.paidAt ? fmtInput(new Date(pi.paidAt)) : '—'}</span></div>
+                    <div className="drow"><span className="drow__k">Amount</span><span className="drow__v"><b>£{(pi.paidAmount ?? 0).toLocaleString('en-GB')}</b></span></div>
+                    <div className="drow"><span className="drow__k">Stripe reference</span><span className="drow__v pay-mono">{pi.paymentRef ?? '—'}</span></div>
+                  </>
+                )}
+                {payRefunded && (
+                  <>
+                    <div className="pay-state pay-state--refunded"><span className="pay-dot" />Refunded</div>
+                    {pi.refundAfterStart && (
+                      <div className="pay-anomaly">
+                        <Icon name="alert" strokeWidth={2.2} />
+                        <span><b>Refunded after tenancy start, outside refund policy.</b> Review required. Recorded truthfully; nothing was reversed automatically.</span>
+                      </div>
+                    )}
+                    <div className="drow"><span className="drow__k">Refunded on</span><span className="drow__v">{pi.refundedAt ? fmtInput(new Date(pi.refundedAt)) : '—'}</span></div>
+                    <div className="drow"><span className="drow__k">Refund reference</span><span className="drow__v pay-mono">{pi.refundRef ?? '—'}</span></div>
+                    <div className="pay-note">No commission or premium accrues on a refunded fee. The Sent to Paid transition is not reversed (by design).</div>
+                  </>
+                )}
+                {payAwaiting && (
+                  <>
+                    <div className="pay-state pay-state--awaiting"><span className="pay-dot" />Awaiting payment</div>
+                    <div className="drow"><span className="drow__k">Guarantor fee</span><span className="drow__v"><b>{d.rent}</b> · one month's rent</span></div>
+                    {pi.paymentUrl && (
+                      <>
+                        <div className="pay-link">
+                          <input readOnly value={pi.paymentUrl} onFocus={(e) => e.currentTarget.select()} aria-label="Checkout link" />
+                          <Button variant="ghost" size="sm" onClick={copyLink}>{copied ? 'Copied' : 'Copy'}</Button>
+                        </div>
+                        <div style={{ marginTop: 10 }}>
+                          <Button variant="primary" size="sm" block onClick={doResend} disabled={resendBusy}><Icon name="mail" /> {resendBusy ? 'Sending…' : 'Resend payment email'}</Button>
+                        </div>
+                      </>
+                    )}
+                    {lastEmailLog && <div className={`pay-note${lastEmailLog.kind === 'payment_email_failed' ? ' pay-note--warn' : ''}`}>{lastEmailLog.message}</div>}
+                  </>
+                )}
+              </CardBody>
+            </Card>
+          )}
           <Card className="gsum">
             <CardBody>
               <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.16em', textTransform: 'uppercase', color: 'rgba(255,255,255,0.6)' }}>Guarantee reference</div>
@@ -219,7 +424,7 @@ export function ApplicationDetail() {
           </Card>
 
           <Card>
-            <CardHead title="Guarantee deed" />
+            <CardHead title="Guarantee deed" actions={SUPABASE_ENABLED && pandadocSandbox() ? <span className="pay-badge">Sandbox</span> : undefined} />
             <CardBody>
               {isDeed ? (
                 <>
@@ -231,15 +436,45 @@ export function ApplicationDetail() {
                     </div>
                   </div>
                   <div style={{ marginTop: 14 }}>
-                    <Button variant="primary" block><Icon name="download" /> Download deed</Button>
+                    <Button variant="primary" block onClick={doDownloadDeed}><Icon name="download" /> Download deed</Button>
                   </div>
+                  {canSend && (
+                    <div style={{ marginTop: 10 }}>
+                      <Button variant="ghost" block onClick={openSend}><Icon name="send" /> Send deed to agent</Button>
+                    </div>
+                  )}
                 </>
+              ) : SUPABASE_ENABLED && pi && d.status === 'paid' && pi.deedState ? (
+                pi.deedState === 'awaiting_tenant' ? (
+                  <>
+                    <div className="deed" style={{ opacity: 0.95 }}>
+                      <span className="deed__ic" style={{ color: 'var(--sent)' }}><Icon name="clock" strokeWidth={1.8} /></span>
+                      <div className="grow">
+                        <div className="deed__t">Deed sent for signature, awaiting tenant</div>
+                        <div className="deed__s">{pi.deedSentAt ? `Sent to the tenant on ${fmtInput(new Date(pi.deedSentAt))}` : 'Sent to the tenant to sign'}</div>
+                      </div>
+                    </div>
+                    <div style={{ marginTop: 12 }}>
+                      <Button variant="primary" size="sm" block onClick={doResendDeed} disabled={deedBusy}><Icon name="send" /> {deedBusy ? 'Sending…' : 'Resend signature request'}</Button>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <div className="pay-anomaly">
+                      <Icon name="alert" strokeWidth={2.2} />
+                      <span>{pi.deedState === 'declined' ? 'Tenant declined to sign the deed. Review required.' : pi.deedState === 'voided' ? 'Deed document voided in PandaDoc. Review required.' : 'Deed could not be generated. Check the branch has an agent contact, then retry.'}</span>
+                    </div>
+                    <div style={{ marginTop: 10 }}>
+                      <Button variant="primary" size="sm" block onClick={doResendDeed} disabled={deedBusy}><Icon name="file" /> {deedBusy ? 'Working…' : 'Generate deed'}</Button>
+                    </div>
+                  </>
+                )
               ) : (
                 <div className="deed" style={{ opacity: 0.85 }}>
                   <span className="deed__ic" style={{ color: 'var(--ink-mute)' }}><Icon name="clock" strokeWidth={1.8} /></span>
                   <div className="grow">
                     <div className="deed__t">Deed not yet issued</div>
-                    <div className="deed__s">{d.status === 'paid' ? 'Issued shortly after payment' : 'Issued once the guarantor fee is paid'}</div>
+                    <div className="deed__s">{d.status === 'paid' ? 'Deed sent for signature shortly after payment' : 'Issued once the guarantor fee is paid'}</div>
                   </div>
                 </div>
               )}
@@ -269,16 +504,16 @@ export function ApplicationDetail() {
         onClose={() => setAmendOpen(false)}
         width={460}
         title="Amend tenancy start date"
-        sub="The start date can be amended while it stays within 7 days of the payment date. Saving reissues the Deed of Guarantee with the corrected date."
+        sub={reissues ? 'Amending the tenancy start date will reissue the Deed of Guarantee with the new date, and the expiry updates to 12 months on.' : 'Correct the tenancy start date. There is no deed yet, so this just updates the application.'}
         footer={
           <>
             <Button variant="ghost" onClick={() => setAmendOpen(false)}>Cancel</Button>
-            <Button variant="primary" onClick={saveAmend} disabled={!canSave}>Save and reissue deed</Button>
+            <Button variant="primary" onClick={saveAmend} disabled={!canSave}>{reissues ? 'Save and reissue deed' : 'Save start date'}</Button>
           </>
         }
       >
         <div className="amend-facts">
-          <div className="amend-fact"><div className="k">Payment date</div><div className="v">{PAYMENT ? fmtLong(PAYMENT) : '—'}</div></div>
+          {PAYMENT && <div className="amend-fact"><div className="k">Payment date</div><div className="v">{fmtLong(PAYMENT)}</div></div>}
           <div className="amend-fact"><div className="k">Current start</div><div className="v">{fmtLong(currentStart)}</div></div>
         </div>
         <div className="field">
@@ -288,6 +523,90 @@ export function ApplicationDetail() {
         <div className={`amend-msg${amendTone === 'ok' ? ' amend-msg--ok' : amendTone === 'err' ? ' amend-msg--err' : ''}`} style={amendTone === 'neutral' ? { color: 'var(--ink-mute)' } : undefined}>
           <Icon name={amendTone === 'err' ? 'info' : 'check'} strokeWidth={2.4} style={amendTone === 'neutral' ? { color: 'var(--ink-mute)' } : amendTone === 'ok' ? { color: 'var(--deed)' } : undefined} />
           {amendText}
+        </div>
+      </Modal>
+
+      {/* SEND DEED TO AGENT MODAL */}
+      <Modal
+        open={sendOpen}
+        onClose={() => setSendOpen(false)}
+        width={460}
+        title="Send deed to agent"
+        sub="A copy of the Deed of Guarantee will be emailed to the agent contact for this branch."
+        footer={
+          <>
+            <Button variant="ghost" onClick={() => setSendOpen(false)}>Cancel</Button>
+            <Button variant="primary" onClick={confirmSend} disabled={sendDisabled}>Send deed</Button>
+          </>
+        }
+      >
+        <div>
+          <div style={{ fontSize: 12, fontWeight: 700, letterSpacing: '0.12em', textTransform: 'uppercase', color: 'var(--ink-mute)', marginBottom: 8 }}>Send to</div>
+
+          {isReferrer ? (
+            // Referrers are send-only: send to the resolved recipient, with no one-off address or saving.
+            resolved.contact ? (
+              <>
+                <div className="send-opt" style={{ cursor: 'default' }}>
+                  <span className="send-opt__main">
+                    <b>{resolved.contact.name}</b>{resolved.contact.role ? ` · ${resolved.contact.role}` : ''}
+                    <br />
+                    <span className="send-opt__email">{resolved.contact.email}{resolved.contact.phone ? ` · ${resolved.contact.phone}` : ''}</span>
+                  </span>
+                </div>
+                <div style={{ fontSize: 11.5, color: 'var(--ink-mute)', marginTop: 6 }}>From the {sendSrc}.</div>
+              </>
+            ) : (
+              <div style={{ fontSize: 12.5, color: 'var(--ink-soft)' }}>
+                No agent contact is saved for this branch or agency. Ask opndoor or your manager to add one before sending the deed.
+              </div>
+            )
+          ) : (
+            <>
+              {eff.list.length > 0 ? (
+                <>
+                  <div className="send-opts">
+                    {eff.list.map((c, i) => (
+                      <label className="send-opt" key={i}>
+                        <input type="radio" name="send-to" checked={sendSel === String(i)} onChange={() => setSendSel(String(i))} />
+                        <span className="send-opt__main">
+                          <b>{c.name}</b>{c.role ? ` · ${c.role}` : ''}
+                          <br />
+                          <span className="send-opt__email">{c.email}{c.phone ? ` · ${c.phone}` : ''}</span>
+                        </span>
+                      </label>
+                    ))}
+                  </div>
+                  <div style={{ fontSize: 11.5, color: 'var(--ink-mute)', marginTop: 6 }}>From the {sendSrc}.</div>
+                </>
+              ) : (
+                <div style={{ fontSize: 12.5, color: 'var(--ink-soft)', marginBottom: 6 }}>
+                  No agent contact is saved for this branch or agency. Enter a recipient below, or add one on the{' '}
+                  <Link to="/agencies" style={{ color: 'var(--heliotrope-deep)', fontWeight: 700 }}>Agencies and branches</Link> screen.
+                </div>
+              )}
+
+              <label className="send-opt send-opt--other">
+                <input type="radio" name="send-to" checked={sendSel === 'other'} onChange={() => setSendSel('other')} />
+                <span className="send-opt__main">
+                  <b>Send to another address</b>
+                  <br />
+                  <span className="send-opt__email">A one-off recipient, not saved to the agency</span>
+                </span>
+              </label>
+
+              <div className={`send-other${sendSel === 'other' ? ' is-open' : ''}`}>
+                <div className="form-grid" style={{ gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                  <div className="field"><label htmlFor="so-name">Name</label><input type="text" id="so-name" autoComplete="off" placeholder="Recipient name" value={soName} onChange={(e) => setSoName(e.target.value)} /></div>
+                  <div className="field"><label htmlFor="so-role">Role <span className="hint">Optional</span></label><input type="text" id="so-role" autoComplete="off" placeholder="e.g. Property manager" value={soRole} onChange={(e) => setSoRole(e.target.value)} /></div>
+                  <div className="field span-2"><label htmlFor="so-email">Email</label><input type="email" id="so-email" autoComplete="off" placeholder="name@example.co.uk" value={soEmail} onChange={(e) => setSoEmail(e.target.value)} /></div>
+                </div>
+                <label className="send-save-note"><input type="checkbox" checked={soSave} onChange={(e) => setSoSave(e.target.checked)} /> <span>Also save this contact to the {d.branch} branch</span></label>
+              </div>
+            </>
+          )}
+
+          <p style={{ fontSize: 12.5, color: 'var(--ink-mute)', margin: '14px 0 0' }}>A copy of Guarantee_Deed_{d.ref}.pdf will be emailed to the {isReferrer ? 'recipient above' : 'selected recipient'}.</p>
         </div>
       </Modal>
     </>

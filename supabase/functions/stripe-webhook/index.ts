@@ -1,0 +1,85 @@
+// =====================================================================
+// stripe-webhook (verify_jwt = false)
+//
+// Stripe cannot send a Supabase JWT, so JWT verification is off and security
+// is the Stripe signature (STRIPE_WEBHOOK_SECRET). Uses the service role for
+// the privileged transition via apply_stripe_payment / apply_stripe_refund.
+//
+// Idempotency, two layers:
+//  1. Each event id is inserted into stripe_events; a duplicate delivery is a
+//     no-op (returns 200 without processing).
+//  2. apply_stripe_payment only transitions a still-Sent application, so a
+//     repeated completed event never double-transitions.
+//
+// Failure / abandonment (payment_intent.payment_failed, checkout.session.expired)
+// leave status untouched. Refunds are recorded without reversing Sent -> Paid.
+//
+// TEST MODE ONLY: refuses to run unless STRIPE_SECRET_KEY is an sk_test_ key.
+// =====================================================================
+import Stripe from "npm:stripe@^17";
+import { createClient } from "npm:@supabase/supabase-js@2";
+import { generateDeed } from "../_shared/pandadoc.ts";
+
+Deno.serve(async (req) => {
+  const STRIPE_SECRET = Deno.env.get("STRIPE_SECRET_KEY") ?? "";
+  const WEBHOOK_SECRET = Deno.env.get("STRIPE_WEBHOOK_SECRET") ?? "";
+  if (!STRIPE_SECRET.startsWith("sk_test_")) return new Response("Test mode only (sk_test_ required).", { status: 400 });
+  if (!WEBHOOK_SECRET) return new Response("Webhook secret not configured.", { status: 400 });
+
+  const stripe = new Stripe(STRIPE_SECRET, { httpClient: Stripe.createFetchHttpClient(), apiVersion: "2024-06-20" });
+  const sig = req.headers.get("stripe-signature");
+  const body = await req.text();
+
+  let event: Stripe.Event;
+  try {
+    event = await stripe.webhooks.constructEventAsync(body, sig!, WEBHOOK_SECRET, undefined, Stripe.createSubtleCryptoProvider());
+  } catch (e) {
+    return new Response(`Signature verification failed: ${e instanceof Error ? e.message : String(e)}`, { status: 400 });
+  }
+
+  const service = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
+
+  // Layer 1 idempotency: record the event id; a duplicate is skipped.
+  const { error: insErr } = await service.from("stripe_events").insert({ id: event.id, type: event.type });
+  if (insErr) {
+    if (insErr.code === "23505") return new Response(JSON.stringify({ received: true, duplicate: true }), { status: 200, headers: { "Content-Type": "application/json" } });
+    return new Response(`Could not record event: ${insErr.message}`, { status: 500 }); // let Stripe retry
+  }
+
+  try {
+    if (event.type === "checkout.session.completed") {
+      const s = event.data.object as Stripe.Checkout.Session;
+      const appId = s.metadata?.application_id ?? (typeof s.client_reference_id === "string" ? s.client_reference_id : null);
+      const pi = typeof s.payment_intent === "string" ? s.payment_intent : s.payment_intent?.id ?? null;
+      const amount = (s.amount_total ?? 0) / 100;
+      if (appId) {
+        await service.rpc("apply_stripe_payment", { p_application_id: appId, p_payment_intent: pi, p_amount: amount, p_session_id: s.id });
+        await service.from("stripe_events").update({ application_id: appId }).eq("id", event.id);
+        await service.from("activity_log").insert({ application_id: appId, kind: "payment_received", message: `Guarantor fee paid (£${amount.toLocaleString("en-GB")}) via Stripe.`, actor: "Stripe" });
+        // On the new Paid transition, generate the deed and send it to the tenant to sign.
+        const { data: appRow } = await service.from("applications").select("status, deed_state").eq("id", appId).maybeSingle();
+        if (appRow?.status === "paid" && !appRow?.deed_state) {
+          await generateDeed(service, appId);
+        }
+      }
+    } else if (event.type === "charge.refunded") {
+      const c = event.data.object as Stripe.Charge;
+      const pi = typeof c.payment_intent === "string" ? c.payment_intent : c.payment_intent?.id ?? null;
+      const refundId = c.refunds?.data?.[0]?.id ?? c.id;
+      if (pi) {
+        await service.rpc("apply_stripe_refund", { p_payment_intent: pi, p_refund_id: refundId, p_amount: (c.amount_refunded ?? 0) / 100 });
+        const { data: appRow } = await service.from("applications").select("id, refund_after_start").eq("stripe_payment_intent_id", pi).maybeSingle();
+        if (appRow) {
+          await service.from("activity_log").insert({ application_id: appRow.id, kind: "refunded", message: "Payment refunded in Stripe.", actor: "Stripe" });
+          if (appRow.refund_after_start) {
+            await service.from("activity_log").insert({ application_id: appRow.id, kind: "refund_anomaly", message: "POLICY ANOMALY: refunded on or after the tenancy start date, outside the refund policy. Review required.", actor: "System" });
+          }
+        }
+      }
+    }
+    // payment_intent.payment_failed / checkout.session.expired: acknowledged, no status change.
+    return new Response(JSON.stringify({ received: true }), { status: 200, headers: { "Content-Type": "application/json" } });
+  } catch (e) {
+    return new Response(`Handler error: ${e instanceof Error ? e.message : String(e)}`, { status: 500 });
+  }
+});

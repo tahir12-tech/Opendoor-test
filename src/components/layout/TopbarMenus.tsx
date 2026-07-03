@@ -94,7 +94,7 @@ export function NotificationsMenu({ open, onToggle, read, onClear }: { open: boo
           </div>
         </Link>
         <div className="tb-pop__foot">
-          <Link to="/applications">View all activity</Link>
+          <Link to="/activity">View all activity</Link>
         </div>
       </div>
     </div>

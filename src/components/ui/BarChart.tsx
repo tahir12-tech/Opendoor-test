@@ -12,8 +12,8 @@ export interface BarRow {
   display: string;
 }
 
-export function BarChart({ rows, topIndex }: { rows: BarRow[]; topIndex: number }) {
-  const max = rows.length ? Math.max(...rows.map((r) => r.value), 1) : 1;
+export function BarChart({ rows, topIndex, max: fixedMax }: { rows: BarRow[]; topIndex: number; max?: number }) {
+  const max = fixedMax ?? (rows.length ? Math.max(...rows.map((r) => r.value), 1) : 1);
   return (
     <div className="bars">
       {rows.map((r, i) => {

@@ -9,8 +9,9 @@ import { App } from './App';
 import type { Role } from './data';
 
 const routes = [
-  '/login', '/forgot-password', '/dashboard', '/applications', '/applications/GR-20418',
-  '/new-application', '/agencies', '/partners', '/users', '/users?team=opndoor', '/reconciliation', '/help',
+  '/login', '/forgot-password', '/dashboard', '/league', '/league?view=branch', '/league?view=referrer',
+  '/activity', '/applications', '/applications/GR-20418', '/applications/GR-20489', '/new-application', '/agencies',
+  '/partners', '/users', '/users?team=opndoor', '/reconciliation', '/help',
 ];
 const roles: Role[] = ['superadmin', 'management', 'referrer'];
 

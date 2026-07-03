@@ -40,6 +40,19 @@ export interface CommissionRates {
 }
 
 /* ---------- Organisation hierarchy ---------- */
+
+/**
+ * An agent contact on an agency or a branch. Exactly one is primary per owner.
+ * A branch with no contacts inherits the parent agency's (see effectiveContacts).
+ */
+export interface AgentContact {
+  name: string;
+  email: string;
+  phone: string;
+  role: string;
+  primary: boolean;
+}
+
 export interface Branch {
   name: string;
   area: string;
@@ -47,6 +60,7 @@ export interface Branch {
   referrals: number;
   guaranteed: string;
   fees?: number;
+  contacts?: AgentContact[];
   /** Set when a referrer created this on the fly; surfaced in reconciliation. */
   unreviewed?: boolean;
 }
@@ -60,6 +74,7 @@ export interface Agency {
   referrals: number;
   guaranteed: string;
   fees?: number;
+  contacts?: AgentContact[];
   /** UI expand state (seeded so the primary agency starts open). */
   open?: boolean;
   branches: Branch[];
@@ -91,6 +106,8 @@ export interface ApplicationSummary {
   /** 1 when the demo referrer (Priya Nair) owns this referral. */
   owner: number;
   partner: string;
+  /** True when the guarantor fee was refunded (status stays Paid, by design). */
+  refunded?: boolean;
 }
 
 /** Display-ready record for the detail view (see applicationsService.getApplicationDetail). */
@@ -128,6 +145,8 @@ export interface ApplicationDetail {
   expiry: string | null;
   annual: string;
   paymentDate: Date | null;
+  /** 1 when the signed-in demo referrer owns this referral (for amend scoping). */
+  owner: number;
 }
 
 /* ---------- Help & resources ---------- */
@@ -184,4 +203,52 @@ export interface Period {
   fSent: number;
   sp: number;
   pd: number;
+}
+
+/* ---------- Activity feed + upcoming expiries ---------- */
+export type ActivityKind = 'sent' | 'paid' | 'deed';
+export interface ActivityEntry {
+  id: string;
+  kind: ActivityKind;
+  ref: string;
+  tenant: string;
+  prop: string;
+  branch: string;
+  agency: string;
+  partner: string;
+  at: Date;
+}
+
+/** Urgency bands for an approaching expiry (mutually exclusive ranges). */
+export type ExpiryBand = 'soon' | 'warn' | 'notice' | 'later';
+export interface UpcomingExpiry {
+  ref: string;
+  tenant: string;
+  prop: string;
+  branch: string;
+  agency: string;
+  partner: string;
+  expiry: Date;
+  /** Whole days from today to the expiry date (>= 0 for upcoming). */
+  daysUntil: number;
+  band: ExpiryBand;
+}
+
+/* ---------- League tables ---------- */
+export type LeagueView = 'agency' | 'branch' | 'referrer';
+export interface LeagueRow {
+  name: string;
+  sub: string;
+  refs: number;
+  fees: number;
+  paid: number;
+  deed: number;
+  /** Sent-to-Paid conversion (fraction). */
+  sp: number;
+  /** Sent-to-Deed conversion (fraction). */
+  conv: number;
+  /** Partner commission (per-partner rate applied to fees). */
+  partnerComm: number;
+  /** Agent commission (per-partner rate applied to fees). */
+  agentComm: number;
 }

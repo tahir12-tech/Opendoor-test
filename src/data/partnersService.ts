@@ -18,8 +18,22 @@ import { DEFAULT_AGENT_RATE, DEFAULT_PARTNER_RATE, HOME_PARTNER, PARTNERS_SEED }
 let PARTNERS: Partner[] = loadJSON<Partner[]>(KEYS.partners, clone(PARTNERS_SEED));
 if (!PARTNERS.length) PARTNERS = clone(PARTNERS_SEED);
 
+// The signed-in user's home partner. Defaults to the demo home partner; set from
+// the real session profile in Supabase mode (see SessionContext / hydrate).
+let HOME: string = HOME_PARTNER;
+
 function persist(): void {
   saveJSON(KEYS.partners, PARTNERS);
+}
+
+/** Replace the partner list from the back end (Supabase mode). */
+export function hydratePartners(rows: Partner[]): void {
+  PARTNERS = rows.slice();
+}
+
+/** Set the signed-in user's home partner (Management/Referrer scope). */
+export function setHomePartner(id: string): void {
+  HOME = id;
 }
 
 export function getPartners(): Partner[] {
@@ -36,7 +50,7 @@ export function partnerName(id: string): string {
 }
 
 export function homePartner(): string {
-  return HOME_PARTNER;
+  return HOME;
 }
 
 export interface AddPartnerInput {
@@ -102,7 +116,7 @@ export function setSelectedPartner(id: PartnerScope): void {
 
 /** Central partner-isolation rule: admin follows the selector; others are pinned home. */
 export function scopeFor(role: Role): PartnerScope {
-  return role === 'superadmin' ? getSelectedPartner() : HOME_PARTNER;
+  return role === 'superadmin' ? getSelectedPartner() : HOME;
 }
 
 /** Demo analytics weight for a scope ("all" sums every partner's weight). */

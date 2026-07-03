@@ -9,12 +9,13 @@
    ===================================================================== */
 import { useMemo, useState } from 'react';
 import {
-  ALL_PARTNERS, buildApplicationCsv, buildBordereauCsv, buildPerformanceCsv, downloadCsv,
-  fmtBig, getDashboardData, getMonthlyTrend, getPartners, getPeriods, partnerName,
+  ALL_PARTNERS, buildApplicationDoc, buildBordereauCsv, buildPerformanceDoc, downloadCsv, exportBranded,
+  fmtBig, getDashboardData, getMonthlyTrend, getPartners, getPaymentSummary, getPeriods, getRatesFor, partnerName,
   trendPartnerRate, type Period,
 } from '@/data';
+import { BASIS_META, type ExportBasis } from '@/data';
 import type { ShapeRow } from '@/data/mock/analyticsModel';
-import { DEFAULT_INSURANCE_RATE } from '@/data/mock/analyticsModel';
+import { DEFAULT_INSURANCE_RATE, convFor } from '@/data/mock/analyticsModel';
 import { useSession } from '@/session/SessionContext';
 import { usePageMeta } from '@/components/layout/pageMeta';
 import { Button } from '@/components/ui/Button';
@@ -29,25 +30,50 @@ import { BarChart, type BarRow } from '@/components/ui/BarChart';
 import { MeasureSelect, PeriodSelect, TrendSelect } from '@/components/ui/Select';
 import './Dashboard.css';
 
-type Measure = 'value' | 'count';
+type ChartKey = 'branch' | 'agency' | 'referrer';
+type Measure = 'value' | 'count' | 'conv';
 type TrendMeasure = 'commission' | 'value' | 'count';
 type TrendView = 'month' | 'branch' | 'agency' | 'referrer';
 
+const TOP_N = 10;
+
 function measureLabel(m: string): string {
-  return m === 'commission' ? 'Commission earned' : m === 'value' ? 'Fees collected' : 'Referrals sent';
+  return m === 'commission' ? 'Commission earned' : m === 'conv' ? 'Conversion, Sent to Deed' : m === 'value' ? 'Fees collected' : 'Referrals sent';
 }
 
-/** Sort + format shape rows for a volume chart under the chosen measure. */
-function volumeRows(rows: ShapeRow[], m: Measure): BarRow[] {
-  return rows
-    .slice()
-    .sort((a, b) => (m === 'value' ? b[2] - a[2] : b[1] - a[1]))
-    .map((r) => ({
-      label: r[0],
-      sub: r[3],
-      value: m === 'value' ? r[2] : r[1],
-      display: m === 'value' ? fmtBig(r[2]) : String(r[1]),
-    }));
+/**
+ * Build the (top-10) bars for a volume chart: fees / count / conversion, with an
+ * always-on Sent-to-Deed sub-line on branch and agency bars (and the parent
+ * agency on branch bars). Returns the bars, the total for the count line, and a
+ * fixed max for the conversion measure (scaled against 100%).
+ */
+function buildChartRows(key: ChartKey, rows: ShapeRow[], m: Measure): { bars: BarRow[]; total: number; max?: number } {
+  const showConv = key === 'branch' || key === 'agency';
+  const isConv = m === 'conv' && showConv;
+  const total = rows.length;
+
+  if (isConv) {
+    const sorted = rows
+      .map((r) => {
+        const [sp, pd] = convFor(key, r[0]);
+        return { label: r[0], sub: r[3], pct: Math.round(sp * pd * 100) };
+      })
+      .sort((a, b) => b.pct - a.pct)
+      .slice(0, TOP_N);
+    return { bars: sorted.map((x) => ({ label: x.label, sub: x.sub, value: x.pct, display: `${x.pct}%` })), total, max: 100 };
+  }
+
+  const sorted = rows.slice().sort((a, b) => (m === 'value' ? b[2] - a[2] : b[1] - a[1])).slice(0, TOP_N);
+  const bars: BarRow[] = sorted.map((r) => {
+    const subBits: string[] = [];
+    if (r[3]) subBits.push(r[3]);
+    if (showConv) {
+      const [sp, pd] = convFor(key, r[0]);
+      subBits.push(`${Math.round(sp * pd * 100)}% Sent to Deed`);
+    }
+    return { label: r[0], sub: subBits.join(' · ') || undefined, value: m === 'value' ? r[2] : r[1], display: m === 'value' ? fmtBig(r[2]) : String(r[1]) };
+  });
+  return { bars, total };
 }
 
 export function Dashboard() {
@@ -55,18 +81,29 @@ export function Dashboard() {
   const { role, partnerScope, selectedPartner, setSelectedPartner, period, setPeriod } = useSession();
 
   const d = useMemo(() => getDashboardData(role, period, partnerScope), [role, period, partnerScope]);
+  // Live payment + refund figures (Supabase mode only). The funnel/charts above
+  // remain the modelled portfolio; these are the real, honest payment truth.
+  const pay = getPaymentSummary(role, partnerScope, period as Period);
+  const gbpExact = (n: number) => `£${Math.round(n).toLocaleString('en-GB')}`;
+  const payRates = getRatesFor(partnerScope);
+  const partnerCommNet = pay.feesNet * payRates.partner;
+  const agentCommNet = pay.feesNet * payRates.agent;
+  const partnerCommExcl = pay.refundValue * payRates.partner;
+  const agentCommExcl = pay.refundValue * payRates.agent;
 
-  const [measure, setMeasure] = useState<Record<'branch' | 'agency' | 'referrer', Measure>>({ branch: 'value', agency: 'value', referrer: 'value' });
+  const [measure, setMeasure] = useState<Record<ChartKey, Measure>>({ branch: 'value', agency: 'value', referrer: 'value' });
   const [trendView, setTrendView] = useState<TrendView>('month');
   const [trendMeasure, setTrendMeasure] = useState<TrendMeasure>('commission');
 
   const partners = getPartners();
   const periods = getPeriods();
 
+  // The scope label shows only for opndoor admin; Management only ever sees its own partner.
   const scopeName = partnerScope === ALL_PARTNERS ? 'All partners' : partnerName(partnerScope);
+  const eyebrowText = `${role === 'superadmin' ? `${scopeName} · ` : ''}Performance · ${period.label}`;
 
   // ---- volume charts ----
-  const chartMeta: { key: 'branch' | 'agency' | 'referrer'; rows: ShapeRow[]; scope: string }[] = [
+  const chartMeta: { key: ChartKey; rows: ShapeRow[]; scope: string }[] = [
     { key: 'branch', rows: d.branches, scope: d.branchScope },
     { key: 'agency', rows: d.agencies, scope: d.agencyScope },
     { key: 'referrer', rows: d.referrers, scope: d.referrerScope },
@@ -90,14 +127,16 @@ export function Dashboard() {
   const [bdxOpen, setBdxOpen] = useState(false);
   const [bdxMonth, setBdxMonth] = useState('2026-06');
   const [bdxRate, setBdxRate] = useState(String(DEFAULT_INSURANCE_RATE));
+  const [appsOpen, setAppsOpen] = useState(false);
+  const [appsBasis, setAppsBasis] = useState<ExportBasis>('referred');
 
   function exportSummary() {
-    const { csv, filename } = buildPerformanceCsv(role, period as Period);
-    downloadCsv(csv, filename);
+    void exportBranded(buildPerformanceDoc(role, period as Period));
   }
-  function exportApplications() {
-    const out = buildApplicationCsv(role, period as Period);
-    if (out) downloadCsv(out.csv, out.filename);
+  function runAppsExport() {
+    const built = buildApplicationDoc(role, period as Period, appsBasis);
+    if (built) void exportBranded(built);
+    setAppsOpen(false);
   }
   function exportBordereau() {
     const mv = (bdxMonth || '2026-06').split('-');
@@ -111,7 +150,7 @@ export function Dashboard() {
     <>
       <div className="page-head">
         <div>
-          <Eyebrow>{`${scopeName} · Performance · ${period.label}`}</Eyebrow>
+          <Eyebrow>{eyebrowText}</Eyebrow>
           <h1 className="page-head__title" style={{ marginTop: 10 }}>Dashboard</h1>
           <p className="page-head__sub">{d.sub}</p>
         </div>
@@ -130,7 +169,7 @@ export function Dashboard() {
             <Icon name="download" /> Export summary
           </Button>
           <RoleOnly roles={['superadmin', 'management']}>
-            <Button variant="ghost" size="sm" onClick={exportApplications} title="Downloads one row per application, pseudonymised by guarantee reference">
+            <Button variant="ghost" size="sm" onClick={() => setAppsOpen(true)} title="Downloads one row per application, pseudonymised by guarantee reference">
               <Icon name="apps" /> Application export
             </Button>
           </RoleOnly>
@@ -264,9 +303,56 @@ export function Dashboard() {
           </RoleOnly>
         </section>
 
+        {/* LIVE PAYMENTS (Supabase mode) */}
+        {pay.available && (
+          <section className="paylive card">
+            <div className="paylive__head">
+              <div>
+                <div className="kpi__label">Live payments this period</div>
+                <div className="muted" style={{ fontSize: 12, marginTop: 3 }}>Real Stripe figures for {period.label}. Refunds are reported alongside and do not change paid or conversion. The funnel and volume charts show the modelled portfolio.</div>
+              </div>
+              <Pill variant="paid" style={{ fontSize: 12 }}>{pay.paidInPeriod} paid</Pill>
+            </div>
+            <div className="paylive__grid">
+              <div className="paylive__cell">
+                <div className="kpi__label">Guarantor fees collected (gross)</div>
+                <div className="paylive__val">{gbpExact(pay.feesGross)}</div>
+              </div>
+              <div className="paylive__cell">
+                <div className="kpi__label">Less refunds{pay.refundCount ? ` (${pay.refundCount})` : ''}</div>
+                <div className="paylive__val paylive__val--neg">{pay.refundValue ? `- ${gbpExact(pay.refundValue)}` : gbpExact(0)}</div>
+              </div>
+              <div className="paylive__cell">
+                <div className="kpi__label">Net fees</div>
+                <div className="paylive__val">{gbpExact(pay.feesNet)}</div>
+              </div>
+            </div>
+            <div className="paylive__grid" style={{ marginTop: 12 }}>
+              <div className="paylive__cell">
+                <div className="kpi__label">Partner commission ({Math.round(payRates.partner * 100)}%, net of refunds)</div>
+                <div className="paylive__val">{gbpExact(partnerCommNet)}</div>
+              </div>
+              <div className="paylive__cell">
+                <div className="kpi__label">Agent commission ({Math.round(payRates.agent * 100)}%, net of refunds)</div>
+                <div className="paylive__val">{gbpExact(agentCommNet)}</div>
+              </div>
+              <div className="paylive__cell">
+                <div className="kpi__label">Commission excluded (refunded fees)</div>
+                <div className="paylive__val paylive__val--neg">{partnerCommExcl + agentCommExcl ? `- ${gbpExact(partnerCommExcl + agentCommExcl)}` : gbpExact(0)}</div>
+                <div className="muted" style={{ fontSize: 11, marginTop: 4 }}>Partner {gbpExact(partnerCommExcl)} · Agent {gbpExact(agentCommExcl)}</div>
+              </div>
+            </div>
+          </section>
+        )}
+
         {/* CHARTS */}
         <section className="chartrow">
           {chartMeta.map(({ key, rows, scope }) => {
+            const { bars, total, max } = buildChartRows(key, rows, measure[key]);
+            const options = key === 'referrer'
+              ? [{ value: 'value', label: 'Fees collected' }, { value: 'count', label: 'Referral count' }]
+              : [{ value: 'value', label: 'Fees collected' }, { value: 'count', label: 'Referral count' }, { value: 'conv', label: 'Conversion (Sent to Deed)' }];
+            const countLine = total > TOP_N ? `Top ${TOP_N} of ${total}` : `${total} total`;
             const chart = (
               <Card key={key}>
                 <CardHead
@@ -277,13 +363,17 @@ export function Dashboard() {
                       ariaLabel={`Measure for volume by ${key}`}
                       value={measure[key]}
                       onChange={(v) => setMeasure((m) => ({ ...m, [key]: v as Measure }))}
-                      options={[{ value: 'value', label: 'Fees collected' }, { value: 'count', label: 'Referral count' }]}
+                      options={options}
                     />
                   }
                 />
                 <CardBody>
-                  <BarChart rows={volumeRows(rows, measure[key])} topIndex={0} />
+                  <BarChart rows={bars} topIndex={0} max={max} />
                 </CardBody>
+                <CardFoot>
+                  <span className="muted" style={{ fontSize: 12.5 }}>{countLine}</span>
+                  <Button variant="quiet" size="sm" to={`/league?view=${key}`} arrow>View all</Button>
+                </CardFoot>
               </Card>
             );
             if (key === 'referrer') return chart;
@@ -351,6 +441,41 @@ export function Dashboard() {
           </div>
         </section>
       </div>
+
+      {/* APPLICATION EXPORT MODAL (Management + opndoor admin) */}
+      {appsOpen && role !== 'referrer' && (
+        <div className="bdx-scrim is-open" onMouseDown={(e) => e.target === e.currentTarget && setAppsOpen(false)}>
+          <div className="bdx" role="dialog" aria-modal="true">
+            <div className="bdx__head">
+              <div>
+                <div className="bdx__title">Application export</div>
+                <div className="bdx__sub">One pseudonymised row per application, for the period selected on the dashboard. Choose what the period filters on.</div>
+              </div>
+              <button className="bdx__close" aria-label="Close" onClick={() => setAppsOpen(false)}><Icon name="x" /></button>
+            </div>
+            <div className="bdx__body">
+              <div className="field">
+                <label htmlFor="apps-basis">Filter the period by</label>
+                <select id="apps-basis" value={appsBasis} onChange={(e) => setAppsBasis(e.target.value as ExportBasis)}>
+                  <option value="referred">Date referred (Sent) — reconciles to Referrals sent</option>
+                  <option value="paid">Date paid — reconciles to fees collected</option>
+                  <option value="deed">Date deed issued — reconciles to Deeds issued</option>
+                  <option value="activity">All activity — everything Sent, Paid or Deed issued in the period</option>
+                </select>
+                <span className="hint">{BASIS_META[appsBasis].hint}</span>
+              </div>
+              <div className="bdx__warn" style={{ background: 'var(--white-lilac)', borderColor: 'rgba(211,100,251,0.25)' }}>
+                <Icon name="info" />
+                <span>Each row always shows the application's latest status and its paid and deed dates whenever they occurred, so a referral made one month and paid the next is captured on the "Date paid" basis for the month it was paid.</span>
+              </div>
+            </div>
+            <div className="bdx__foot">
+              <Button variant="ghost" onClick={() => setAppsOpen(false)}>Cancel</Button>
+              <Button variant="primary" onClick={runAppsExport}>Export</Button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* BORDEREAU MODAL (opndoor admin only) */}
       {bdxOpen && role === 'superadmin' && (

@@ -125,3 +125,26 @@ export const BX_FLATS = ['', 'Flat 2', 'Flat 4', 'Studio 7', 'Apartment 3', 'Fla
 
 /** The single configurable underwriter insurance rate (percent), set in the bordereau modal. */
 export const DEFAULT_INSURANCE_RATE = 13.5;
+
+/* ---------- Per-entity conversion [sentToPaid, paidToDeed] ---------- */
+// Keyed by name so it is independent of the positional row format. Sent-to-Deed = product.
+// Shared by the dashboard breakdown charts and the League tables.
+export const CONV_BRANCH: Record<string, [number, number]> = {
+  'South Kensington': [0.82, 0.93], Marylebone: [0.79, 0.9], Shoreditch: [0.74, 0.88], Chelsea: [0.85, 0.92],
+  Clapham: [0.71, 0.86], Fitzrovia: [0.8, 0.9], Fulham: [0.77, 0.89], Islington: [0.73, 0.87], Balham: [0.69, 0.85],
+};
+export const CONV_AGENCY: Record<string, [number, number]> = {
+  'Foxglove Residential': [0.83, 0.92], 'Marylebone & Co': [0.79, 0.9], 'Northbank Lettings': [0.74, 0.87], 'Hartwell Estates': [0.7, 0.85],
+};
+/** Conversion pair for an agency or branch, falling back to a portfolio default. */
+export function convFor(key: 'agency' | 'branch', name: string): [number, number] {
+  const map = key === 'agency' ? CONV_AGENCY : CONV_BRANCH;
+  return map[name] || [0.78, 0.9];
+}
+
+/** Referrer pool for the League tables (larger than the dashboard's top-six sample). */
+export const LEAGUE_REFERRER_NAMES = [
+  'Priya Nair', 'James Okafor', 'Sophie Bennett', 'Daniel Wright', 'Aisha Khan', 'Marcus Lin', 'Oliver Grant', 'Naomi Clarke',
+  'Tom Fielding', 'Ruth Amankwah', 'Leo Barros', 'Hannah Vaughan', 'Sam Okafor', 'Divya Menon', 'Chris Elliot', 'Beatrice Lund',
+  'Yusuf Adan', 'Grace Bell', 'Nadia Rahman', 'Owen Pryce', 'Elena Costa', 'Josh Kaplan',
+];

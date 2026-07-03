@@ -1,43 +1,125 @@
 /* =====================================================================
-   Login — two steps: credentials, then a 6-digit 2FA code with paste
-   support. On success it routes to the dashboard.
+   Login.
 
-   INTEGRATION: authService.login / verify2fa are mocked (always ok). A real
-   auth service validates credentials, issues/verifies a time-limited code,
-   and returns a session carrying the user's role and partner.
+   Mock mode (tests / no env): the original always-ok two-step form.
+
+   Supabase mode: step 1 is email + password (AAL1); step 2 is TOTP. First-time
+   users enrol (QR + code); returning users are challenged for their code. A
+   verified code steps the session up to AAL2, which the database requires
+   before returning any data. SessionContext then loads the profile + data and
+   this page routes on to the dashboard.
    ===================================================================== */
-import { useRef, useState, type ClipboardEvent, type FormEvent, type KeyboardEvent } from 'react';
+import { useEffect, useRef, useState, type ClipboardEvent, type FormEvent, type KeyboardEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { authService } from '@/data';
+import { SUPABASE_ENABLED } from '@/lib/supabase';
+import { useSession } from '@/session/SessionContext';
 import { Button } from '@/components/ui/Button';
 import { Icon } from '@/components/ui/Icon';
 import { useDocumentTitle } from '@/hooks/useDocumentTitle';
 import '../auth/auth.css';
 import './Login.css';
 
+type Step = 'creds' | '2fa' | 'enrol' | 'verify';
+
 export function Login() {
   useDocumentTitle('Sign in');
   const navigate = useNavigate();
-  const [step, setStep] = useState<'creds' | '2fa'>('creds');
-  const [email, setEmail] = useState('priya.nair@foxglove-residential.co.uk');
-  const [masked, setMasked] = useState('p••••@foxglove-residential.co.uk');
+  const { status } = useSession();
+  const [step, setStep] = useState<Step>('creds');
+  const [email, setEmail] = useState('priya.nair@brackenhouse.co.uk');
+  const [password, setPassword] = useState('');
+  const [masked, setMasked] = useState('');
   const [codes, setCodes] = useState<string[]>(['', '', '', '', '', '']);
+  const [factorId, setFactorId] = useState<string | null>(null);
+  const [qr, setQr] = useState('');
+  const [secret, setSecret] = useState('');
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
   const inputs = useRef<(HTMLInputElement | null)[]>([]);
+  const mfaSetup = useRef(false);
 
-  function submitCreds(e: FormEvent) {
-    e.preventDefault();
-    const res = authService.login(email.trim(), '');
-    if (res.ok) {
-      setMasked(res.maskedEmail);
-      setStep('2fa');
-      setTimeout(() => inputs.current[0]?.focus(), 0);
+  // Already authenticated (AAL2) -> straight to the app.
+  useEffect(() => {
+    if (SUPABASE_ENABLED && status === 'ready') navigate('/dashboard', { replace: true });
+  }, [status, navigate]);
+
+  const focusFirst = () => setTimeout(() => inputs.current[0]?.focus(), 0);
+
+  // Move from a valid AAL1 session to the correct TOTP step (enrol or verify).
+  async function advanceToMfa() {
+    const fs = await authService.factorState();
+    if (fs.hasVerifiedFactor && fs.factorId) {
+      setFactorId(fs.factorId);
+      setStep('verify');
+      focusFirst();
+    } else {
+      const en = await authService.enrolTotp();
+      if (!en.ok || !en.factorId) {
+        setError(en.error ?? 'Could not start authenticator setup.');
+        return;
+      }
+      setFactorId(en.factorId);
+      setQr(en.qr ?? '');
+      setSecret(en.secret ?? '');
+      setStep('enrol');
+      focusFirst();
     }
   }
 
-  function submit2fa(e: FormEvent) {
+  // A refreshed password-only session lands here: resume the TOTP step.
+  useEffect(() => {
+    if (!SUPABASE_ENABLED || mfaSetup.current) return;
+    if (status === 'needsMfa' && step === 'creds') {
+      mfaSetup.current = true;
+      setMasked(authService.maskEmail(email));
+      void advanceToMfa();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [status]);
+
+  async function submitCreds(e: FormEvent) {
     e.preventDefault();
-    authService.verify2fa(codes.join(''));
-    navigate('/dashboard');
+    setError('');
+    setMasked(authService.maskEmail(email.trim()));
+    if (!SUPABASE_ENABLED) {
+      authService.login(email.trim(), password);
+      setStep('2fa');
+      focusFirst();
+      return;
+    }
+    setBusy(true);
+    const r = await authService.signIn(email, password);
+    if (!r.ok) {
+      setError(r.error ?? 'Wrong email or password.');
+      setBusy(false);
+      return;
+    }
+    mfaSetup.current = true;
+    await advanceToMfa();
+    setBusy(false);
+  }
+
+  async function submitCode(e: FormEvent) {
+    e.preventDefault();
+    setError('');
+    const code = codes.join('');
+    if (!SUPABASE_ENABLED) {
+      authService.verify2fa(code);
+      navigate('/dashboard');
+      return;
+    }
+    if (!factorId) return;
+    setBusy(true);
+    const r = await authService.verifyCode(factorId, code);
+    setBusy(false);
+    if (!r.ok) {
+      setError(r.error ?? 'That code was not right. Try again.');
+      setCodes(['', '', '', '', '', '']);
+      focusFirst();
+      return;
+    }
+    // AAL2 reached; SessionContext resolves to "ready" and the effect above routes on.
   }
 
   function setDigit(i: number, value: string) {
@@ -45,11 +127,9 @@ export function Login() {
     setCodes((prev) => prev.map((c, j) => (j === i ? digit : c)));
     if (digit && i < 5) inputs.current[i + 1]?.focus();
   }
-
   function onKeyDown(i: number, e: KeyboardEvent<HTMLInputElement>) {
     if (e.key === 'Backspace' && !codes[i] && i > 0) inputs.current[i - 1]?.focus();
   }
-
   function onPaste(e: ClipboardEvent<HTMLInputElement>) {
     e.preventDefault();
     const digits = (e.clipboardData.getData('text') || '').replace(/[^0-9]/g, '').slice(0, 6).split('');
@@ -57,6 +137,8 @@ export function Login() {
     setCodes((prev) => prev.map((c, j) => digits[j] ?? c));
     inputs.current[Math.min(digits.length, 5)]?.focus();
   }
+
+  const onCode = step === 'enrol' || step === 'verify' || step === '2fa';
 
   return (
     <div className="auth">
@@ -95,7 +177,7 @@ export function Login() {
               <span className="n">1</span><span>Credentials</span>
             </div>
             <span className="auth__step-line" />
-            <div className={`auth__step-dot${step === '2fa' ? ' is-active' : ''}`}>
+            <div className={`auth__step-dot${onCode ? ' is-active' : ''}`}>
               <span className="n">2</span><span>Verify</span>
             </div>
           </div>
@@ -104,34 +186,58 @@ export function Login() {
             <div>
               <h2 className="auth__title">Sign in to the portal</h2>
               <p className="auth__sub">Use the work email your administrator registered for you.</p>
+              {error && <p className="auth__error" style={{ color: 'var(--danger, #c0392b)' }}>{error}</p>}
               <form className="auth__form" onSubmit={submitCreds} noValidate>
                 <div className="field">
                   <label htmlFor="email">Work email</label>
-                  <input id="email" type="email" placeholder="you@foxglove-residential.co.uk" autoComplete="email" value={email} onChange={(e) => setEmail(e.target.value)} required />
+                  <input id="email" type="email" placeholder="you@brackenhouse.co.uk" autoComplete="email" value={email} onChange={(e) => setEmail(e.target.value)} required />
                 </div>
                 <div className="field">
                   <label htmlFor="pass">Password</label>
-                  <input id="pass" type="password" autoComplete="current-password" defaultValue="demo-password" required />
+                  <input id="pass" type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} required />
                 </div>
                 <div className="auth__row">
                   <label><input type="checkbox" /> Keep me signed in for 30 days</label>
                   <a href="/forgot-password">Forgot password?</a>
                 </div>
-                <Button variant="primary" block type="submit" arrow className="" >Continue</Button>
+                <Button variant="primary" block type="submit" arrow disabled={busy}>{busy ? 'Signing in…' : 'Continue'}</Button>
               </form>
               <p className="auth__foot">Not set up yet? Ask your administrator for access, or use the contact details on this screen.</p>
             </div>
           ) : (
             <div>
-              <button className="back-link" type="button" onClick={() => setStep('creds')}>
+              <button className="back-link" type="button" onClick={() => { setStep('creds'); setError(''); }}>
                 <Icon name="arrowLeft" /> Back
               </button>
-              <h2 className="auth__title" style={{ marginTop: 16 }}>Enter your verification code</h2>
-              <p className="auth__sub">We have sent a 6-digit code to <b style={{ color: 'var(--ink)' }}>{masked}</b>. The code expires in 10 minutes.</p>
-              <div style={{ marginTop: 18 }}>
-                <span className="twofa-chip"><Icon name="phone" /> Sent to your authenticator app</span>
-              </div>
-              <form className="auth__form" onSubmit={submit2fa} noValidate>
+
+              {step === 'enrol' ? (
+                <>
+                  <h2 className="auth__title" style={{ marginTop: 16 }}>Set up your authenticator</h2>
+                  <p className="auth__sub">Scan this QR code with an authenticator app (Google Authenticator, 1Password, Authy), then enter the 6-digit code it shows.</p>
+                  {qr && (
+                    <div className="twofa-qr">
+                      <img className="twofa-qr__img" src={qr} alt="Authenticator setup QR code" width={160} height={160} />
+                    </div>
+                  )}
+                  {secret && (
+                    <div className="twofa-key">
+                      <span className="twofa-key__label">Can't scan? Enter this key manually.</span>
+                      <code className="twofa-key__code">{secret}</code>
+                    </div>
+                  )}
+                </>
+              ) : (
+                <>
+                  <h2 className="auth__title" style={{ marginTop: 16 }}>Enter your verification code</h2>
+                  <p className="auth__sub">Open your authenticator app for <b style={{ color: 'var(--ink)' }}>{masked}</b> and enter the current 6-digit code.</p>
+                  <div style={{ marginTop: 18 }}>
+                    <span className="twofa-chip"><Icon name="phone" /> From your authenticator app</span>
+                  </div>
+                </>
+              )}
+
+              {error && <p className="auth__error" style={{ color: 'var(--danger, #c0392b)', marginTop: 12 }}>{error}</p>}
+              <form className="auth__form" onSubmit={submitCode} noValidate>
                 <div className="field">
                   <label>6-digit code</label>
                   <div className="codes">
@@ -152,11 +258,8 @@ export function Login() {
                     ))}
                   </div>
                 </div>
-                <Button variant="primary" block type="submit" arrow>Verify and sign in</Button>
+                <Button variant="primary" block type="submit" arrow disabled={busy}>{busy ? 'Verifying…' : 'Verify and sign in'}</Button>
               </form>
-              <p className="resend" style={{ marginTop: 20 }}>
-                Didn't get a code? <a href="#" onClick={(e) => e.preventDefault()}>Resend code</a> · <a href="#" onClick={(e) => e.preventDefault()}>Use SMS instead</a>
-              </p>
             </div>
           )}
         </div>

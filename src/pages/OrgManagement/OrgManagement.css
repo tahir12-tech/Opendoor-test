@@ -147,6 +147,133 @@
   flex: 1;
   min-width: 0;
 }
+
+/* agent contact summary line */
+.contact-line {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-top: 5px;
+  font-size: 12px;
+  color: var(--ink-soft);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.contact-line svg {
+  width: 13px;
+  height: 13px;
+  color: var(--ink-mute);
+  flex-shrink: 0;
+}
+.contact-line b {
+  color: var(--ink);
+  font-weight: 700;
+}
+.contact-line .cl-inherit {
+  color: var(--ink-mute);
+  font-weight: 600;
+  font-size: 11px;
+}
+.contact-line .cl-none {
+  color: var(--warn);
+  font-weight: 700;
+}
+.contact-manage {
+  all: unset;
+  cursor: pointer;
+  color: var(--heliotrope-deep);
+  font-weight: 700;
+  font-size: 11.5px;
+  flex-shrink: 0;
+}
+.contact-manage:hover {
+  text-decoration: underline;
+}
+
+/* contacts modal list */
+.ct-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--line);
+}
+.ct-row:last-of-type {
+  border-bottom: none;
+}
+.ct-av {
+  width: 34px;
+  height: 34px;
+  border-radius: 9px;
+  background: var(--white-lilac);
+  color: var(--heliotrope-deep);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--display);
+  font-weight: 700;
+  font-size: 12px;
+  flex-shrink: 0;
+}
+.ct-main {
+  flex: 1;
+  min-width: 0;
+}
+.ct-name {
+  font-weight: 700;
+  font-size: 13.5px;
+  color: var(--ink);
+}
+.ct-name .ct-primary {
+  display: inline-block;
+  margin-left: 7px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--deed);
+  background: var(--deed-bg);
+  border-radius: 5px;
+  padding: 2px 6px;
+  vertical-align: middle;
+}
+.ct-sub {
+  font-size: 12px;
+  color: var(--ink-mute);
+  margin-top: 1px;
+}
+.ct-actions {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+}
+.ct-actions button {
+  all: unset;
+  cursor: pointer;
+  font-size: 11.5px;
+  font-weight: 700;
+  color: var(--ink-soft);
+  padding: 4px 8px;
+  border-radius: 6px;
+}
+.ct-actions button:hover {
+  background: var(--app-bg);
+  color: var(--ink);
+}
+.ct-inherit-note {
+  font-size: 12.5px;
+  color: var(--ink-soft);
+  background: var(--app-bg-2);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  padding: 11px 13px;
+  margin-bottom: 14px;
+  line-height: 1.5;
+}
+.ct-inherit-note b {
+  color: var(--ink);
+}
 .branch__stat {
   text-align: right;
   font-size: 12px;

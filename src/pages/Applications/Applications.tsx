@@ -46,6 +46,7 @@ export function Applications() {
   const [partner, setPartner] = useState('');
   const [agency, setAgency] = useState(() => params.get('agency') || (params.get('branch') ? agencyOfBranch(params.get('branch')!) : ''));
   const [branch, setBranch] = useState(() => params.get('branch') || '');
+  const [refundedOnly, setRefundedOnly] = useState(false);
 
   // Reset partner/agency/branch when the role changes (partner isolation), skipping first run.
   const firstRole = useRef(true);
@@ -67,6 +68,8 @@ export function Applications() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [role, partnerScope, partner, status, agency, branch, q, sort],
   );
+  const refundedCount = useMemo(() => rows.filter((r) => r.refunded).length, [rows]);
+  const visibleRows = refundedOnly ? rows.filter((r) => r.refunded) : rows;
 
   const agencyOptions = agencyNamesForScope(scopeOpts);
   const branchOptions = branchNamesForScope(scopeOpts, agency || undefined);
@@ -157,8 +160,18 @@ export function Applications() {
               <option>Rent: high to low</option>
             </select>
           </span>
+          {refundedCount > 0 && (
+            <button
+              type="button"
+              className={`fchip fchip--toggle${refundedOnly ? ' is-on' : ''}`}
+              onClick={() => setRefundedOnly((v) => !v)}
+              title="Show only refunded applications"
+            >
+              <span className="refund-dot" />Refunded only{refundedOnly ? '' : ` (${refundedCount})`}
+            </button>
+          )}
         </div>
-        <span className="countline">Showing <b>{rows.length}</b> of <b>{total}</b></span>
+        <span className="countline">Showing <b>{visibleRows.length}</b> of <b>{total}</b></span>
       </div>
 
       <Card>
@@ -177,7 +190,7 @@ export function Applications() {
               </tr>
             </thead>
             <tbody>
-              {rows.map((r) => (
+              {visibleRows.map((r) => (
                 <tr key={r.ref} onClick={() => navigate(`/applications/${encodeURIComponent(r.ref)}`)}>
                   <td>
                     <div className="who">
@@ -189,7 +202,7 @@ export function Applications() {
                   <td>{r.prop}</td>
                   <td>{r.branch}<div className="dt__sub">{r.agency}</div></td>
                   <td style={{ textAlign: 'right' }}><span className="dt__rent">£{r.rent.toLocaleString('en-GB')}</span><div className="dt__sub">per month</div></td>
-                  <td><Pill variant={r.status as PillVariant}>{STATUS_LABEL[r.status]}</Pill></td>
+                  <td><span className="status-cell"><Pill variant={r.status as PillVariant}>{STATUS_LABEL[r.status]}</Pill>{r.refunded && <span className="refund-tag" title="Guarantor fee refunded">Refunded</span>}</span></td>
                   <td className="dt__num soft">{fmtDate(r.date)}</td>
                   <td><Icon name="chevronRight" className="dt__chev" size={16} /></td>
                 </tr>
@@ -197,7 +210,7 @@ export function Applications() {
             </tbody>
           </table>
         </div>
-        {rows.length === 0 && <div className="empty is-shown">No applications match your filters.</div>}
+        {visibleRows.length === 0 && <div className="empty is-shown">No applications match your filters.</div>}
       </Card>
     </>
   );

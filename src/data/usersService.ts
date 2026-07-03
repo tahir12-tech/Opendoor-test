@@ -37,7 +37,12 @@ export interface ManagedUser extends User {
   id: string;
 }
 
-const USERS: ManagedUser[] = SEED.map((u, i) => ({ id: `u${i}`, name: u[0], role: u[1], lastActive: u[2], status: u[3], partner: u[4] }));
+let USERS: ManagedUser[] = SEED.map((u, i) => ({ id: `u${i}`, name: u[0], role: u[1], lastActive: u[2], status: u[3], partner: u[4] }));
+
+/** Replace the users working copy from the back end (Supabase mode). */
+export function hydrateUsers(users: ManagedUser[]): void {
+  USERS = users.slice();
+}
 
 export function emailOf(name: string): string {
   return `${name.toLowerCase().replace(/ /g, '.')}@brackenhouse.co.uk`;

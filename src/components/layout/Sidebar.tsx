@@ -3,15 +3,17 @@
    signed-in user footer. Ported from portal.js buildSidebar. The
    reconciliation badge count comes from the queue.
    ===================================================================== */
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { getQueue } from '@/data';
 import { useSession } from '@/session/SessionContext';
+import { SUPABASE_ENABLED } from '@/lib/supabase';
 import { NAV } from '@/constants/nav';
 import { usePageMetaValue } from './pageMeta';
 import { Icon } from '@/components/ui/Icon';
 
 export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
-  const { role, user } = useSession();
+  const { role, user, signOut } = useSession();
+  const navigate = useNavigate();
   const { active } = usePageMetaValue();
   const reconcileBadge = getQueue().length;
 
@@ -57,6 +59,18 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
             <div className="sb__user-name">{user.name}</div>
             <div className="sb__user-role">{user.label}</div>
           </div>
+          {SUPABASE_ENABLED && (
+            <button
+              type="button"
+              className="iconbtn"
+              aria-label="Sign out"
+              title="Sign out"
+              style={{ marginLeft: 'auto' }}
+              onClick={async () => { await signOut(); navigate('/login'); }}
+            >
+              <Icon name="arrowLeft" />
+            </button>
+          )}
         </div>
       </div>
     </>

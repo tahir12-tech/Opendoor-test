@@ -1,0 +1,20 @@
+/* Inline validation error + required marker for .field. */
+.field-error {
+  display: block;
+  margin-top: 5px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--danger, #d64545);
+}
+.field .req {
+  color: var(--danger, #d64545);
+  margin-left: 2px;
+  font-weight: 700;
+}
+.field.is-invalid > input,
+.field.is-invalid > select,
+.field.is-invalid > textarea,
+.field.is-invalid .typeahead__input,
+.field.is-invalid input {
+  border-color: var(--danger, #d64545);
+}

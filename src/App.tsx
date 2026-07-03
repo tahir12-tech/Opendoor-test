@@ -7,9 +7,12 @@
 import { Navigate, Route, Routes } from 'react-router-dom';
 import { AppShell } from '@/components/layout/AppShell';
 import { RequireRole } from '@/components/guards/RequireRole';
+import { RequireAuth } from '@/components/guards/RequireAuth';
 import { Login } from '@/pages/Login/Login';
 import { ForgotPassword } from '@/pages/ForgotPassword/ForgotPassword';
 import { Dashboard } from '@/pages/Dashboard/Dashboard';
+import { League } from '@/pages/League/League';
+import { Activity } from '@/pages/Activity/Activity';
 import { Applications } from '@/pages/Applications/Applications';
 import { ApplicationDetail } from '@/pages/ApplicationDetail/ApplicationDetail';
 import { NewApplication } from '@/pages/NewApplication/NewApplication';
@@ -27,9 +30,12 @@ export function App() {
       <Route path="/login" element={<Login />} />
       <Route path="/forgot-password" element={<ForgotPassword />} />
 
-      {/* authenticated shell */}
+      {/* authenticated shell (RequireAuth is a passthrough in mock/test mode) */}
+      <Route element={<RequireAuth />}>
       <Route element={<AppShell />}>
         <Route path="/dashboard" element={<Dashboard />} />
+        <Route path="/league" element={<League />} />
+        <Route path="/activity" element={<Activity />} />
         <Route path="/applications" element={<Applications />} />
         <Route path="/applications/:ref" element={<ApplicationDetail />} />
         <Route path="/new-application" element={<NewApplication />} />
@@ -46,6 +52,7 @@ export function App() {
           <Route path="/partners" element={<PartnerManagement />} />
           <Route path="/reconciliation" element={<Reconciliation />} />
         </Route>
+      </Route>
       </Route>
 
       {/* unknown → dashboard */}

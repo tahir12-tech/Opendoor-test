@@ -1,8 +1,55 @@
+# Dependencies
 node_modules
+
+# Build outputs
 dist
 dist-ssr
+build
+*.tsbuildinfo
+
+# Local env / secrets (never commit) -----------------------------------------
+# Client publishable keys live in .env.local; server secrets (Stripe secret key,
+# webhook secrets, PandaDoc API key, Supabase service-role key) are set as Edge
+# Function secrets in the dashboard and must never be in the repo.
+.env
+.env.*
 *.local
-.DS_Store
-.vite
-coverage
+!.env.example
+
+# Certificates / key material
+*.pem
+*.key
+*.p12
+*.pfx
+*_rsa
+*.crt
+
+# Supabase local
+supabase/.branches
+supabase/.temp
+.supabase
+
+# Logs
 *.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Test / coverage
+coverage
+.vite
+.vitest
+
+# Editor / tooling
+.vscode
+.idea
+*.swp
+
+# OS files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db

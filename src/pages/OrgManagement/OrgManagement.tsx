@@ -8,8 +8,9 @@
 import { useState, type MouseEvent, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import {
-  ALL_PARTNERS, addAgency, addBranch, getAgencies, getPartners, getRatesFor,
-  type Agency, type Branch,
+  ALL_PARTNERS, addAgency, addBranch, addContact, effectivePrimary, findAgency, getAgencies, getPartners,
+  getRatesFor, removeContact, setPrimaryContact, updateContact,
+  type Agency, type AgentContact, type Branch,
 } from '@/data';
 import { useSession } from '@/session/SessionContext';
 import { usePageMeta } from '@/components/layout/pageMeta';
@@ -48,6 +49,26 @@ function fmtK(n: number): string {
 }
 
 const goIcon = <span className="statlink__go"><Icon name="arrowRight" strokeWidth={2.2} /></span>;
+const ctInitials = (n: string) => n.trim().split(/\s+/).map((p) => p[0]).slice(0, 2).join('').toUpperCase();
+
+/** The effective-primary-contact summary line shown under an agency or branch name. */
+function ContactSummary({ agency, branch, canManage, onManage }: { agency: Agency; branch: Branch | null; canManage: boolean; onManage: () => void }) {
+  const ep = effectivePrimary(agency, branch);
+  const manageBtn = canManage ? (
+    <button className="contact-manage" onClick={(e) => { e.stopPropagation(); onManage(); }}>Manage</button>
+  ) : null;
+  if (!ep.contact) {
+    return <div className="contact-line"><Icon name="mail" /><span className="cl-none">No agent contact</span>{manageBtn}</div>;
+  }
+  return (
+    <div className="contact-line">
+      <Icon name="mail" />
+      <span><b>{ep.contact.name}</b> · {ep.contact.email}</span>
+      {branch && ep.inherited && <span className="cl-inherit">(agency default)</span>}
+      {manageBtn}
+    </div>
+  );
+}
 
 export function OrgManagement() {
   usePageMeta('org', 'Agencies & branches', ['Home', 'Administration', 'Agencies & branches']);
@@ -68,12 +89,73 @@ export function OrgManagement() {
   const [branchArea, setBranchArea] = useState('');
   const [branchAgency, setBranchAgency] = useState('');
 
+  // contacts modal (agent contacts on an agency or branch). Editable by Management too.
+  const canManageContacts = role === 'superadmin' || role === 'management';
+  const [ctOpen, setCtOpen] = useState(false);
+  const [ctAgencyName, setCtAgencyName] = useState('');
+  const [ctBranchName, setCtBranchName] = useState<string | null>(null);
+  const [ctEditIndex, setCtEditIndex] = useState<number | null>(null);
+  const [ctName, setCtName] = useState('');
+  const [ctRole, setCtRole] = useState('');
+  const [ctEmail, setCtEmail] = useState('');
+  const [ctPhone, setCtPhone] = useState('');
+  const [ctPrimary, setCtPrimary] = useState(false);
+
   const rates = getRatesFor(partnerScope);
   const isMgmt = role === 'management';
   const q = query.trim().toLowerCase();
   const pool = getAgencies(partnerScope);
 
   const partnerPoolForBranch = getAgencies(partnerScope);
+
+  // Resolve the contacts-modal owner fresh each render (reflects mutations).
+  const ctAgency = ctOpen ? findAgency(ctAgencyName) ?? null : null;
+  const ctBranch = ctBranchName && ctAgency ? ctAgency.branches.find((b) => b.name === ctBranchName) ?? null : null;
+  const ctContacts: AgentContact[] = (ctBranchName ? ctBranch?.contacts : ctAgency?.contacts) ?? [];
+
+  function openContacts(agencyName: string, branchName: string | null) {
+    setCtAgencyName(agencyName);
+    setCtBranchName(branchName);
+    resetContactForm();
+    setCtOpen(true);
+  }
+  function resetContactForm() {
+    setCtEditIndex(null);
+    setCtName('');
+    setCtRole('');
+    setCtEmail('');
+    setCtPhone('');
+    setCtPrimary(false);
+  }
+  function submitContact() {
+    const name = ctName.trim();
+    const email = ctEmail.trim();
+    if (!name || !email) return;
+    const rec: AgentContact = { name, role: ctRole.trim(), email, phone: ctPhone.trim(), primary: ctPrimary };
+    if (ctEditIndex !== null) updateContact(ctAgencyName, ctBranchName, ctEditIndex, rec);
+    else addContact(ctAgencyName, ctBranchName, rec);
+    resetContactForm();
+    refresh();
+  }
+  function startEditContact(index: number) {
+    const c = ctContacts[index];
+    if (!c) return;
+    setCtEditIndex(index);
+    setCtName(c.name);
+    setCtRole(c.role || '');
+    setCtEmail(c.email);
+    setCtPhone(c.phone || '');
+    setCtPrimary(!!c.primary);
+  }
+  function deleteContact(index: number) {
+    removeContact(ctAgencyName, ctBranchName, index);
+    resetContactForm();
+    refresh();
+  }
+  function makePrimary(index: number) {
+    setPrimaryContact(ctAgencyName, ctBranchName, index);
+    refresh();
+  }
 
   function toggle(id: string) {
     setOpenSet((prev) => {
@@ -171,6 +253,7 @@ export function OrgManagement() {
                 <div className="agency__txt">
                   <div className="agency__name">{highlight(a.name, q)}</div>
                   <div className="agency__meta">{meta}</div>
+                  <ContactSummary agency={a} branch={null} canManage={canManageContacts} onManage={() => openContacts(a.name, null)} />
                 </div>
                 <Link className="statlink statlink--agency" to={`/applications?agency=${encodeURIComponent(a.name)}`} title={`View all applications for ${a.name}`}>
                   <div className="agency__stat"><div className="n">{a.referrals}</div><div className="l">Referrals</div></div>
@@ -195,6 +278,7 @@ export function OrgManagement() {
                       <div className="branch__txt">
                         <div className="branch__name">{highlight(b.name, q)}</div>
                         <div className="branch__meta">{b.area}</div>
+                        <ContactSummary agency={a} branch={b} canManage={canManageContacts} onManage={() => openContacts(a.name, b.name)} />
                       </div>
                       <Link className="statlink statlink--branch" to={`/applications?branch=${encodeURIComponent(b.name)}`} title={`View applications for ${b.name}`}>
                         <div className="branch__stat"><b>{b.referrals}</b>referrals</div>
@@ -245,6 +329,64 @@ export function OrgManagement() {
             {partnerPoolForBranch.map((a) => <option key={agencyId(a)} value={a.name}>{a.name}</option>)}
           </select>
         </Field>
+      </Modal>
+
+      {/* MANAGE AGENT CONTACTS */}
+      <Modal
+        open={ctOpen}
+        onClose={() => setCtOpen(false)}
+        title={`${ctBranchName || ctAgencyName} contacts`}
+        sub={ctBranchName ? 'Agent contacts for this branch. Who the Deed of Guarantee is sent to.' : 'Agency contacts. Used as the default for branches with no contact of their own.'}
+        footer={<Button variant="primary" onClick={() => setCtOpen(false)}>Done</Button>}
+      >
+        {ctBranchName && ctContacts.length === 0 && (
+          <div className="ct-inherit-note">
+            {effectivePrimary(ctAgency, ctBranch).contact ? (
+              <>This branch has no contact of its own, so it uses the <b>{ctAgencyName}</b> agency default (<b>{effectivePrimary(ctAgency, ctBranch).contact!.name}</b>). Add a contact below to override it for this branch.</>
+            ) : (
+              <>This branch has no contact of its own, and the agency has none either. Add a branch contact below, or add an agency contact to cover all its branches.</>
+            )}
+          </div>
+        )}
+
+        <div>
+          {ctContacts.length === 0 ? (
+            <p style={{ fontSize: 13, color: 'var(--ink-mute)', padding: '6px 0 14px' }}>No contacts yet.</p>
+          ) : (
+            ctContacts.map((c, i) => (
+              <div className="ct-row" key={i}>
+                <span className="ct-av">{ctInitials(c.name)}</span>
+                <div className="ct-main">
+                  <div className="ct-name">{c.name}{c.primary && <span className="ct-primary">Primary</span>}</div>
+                  <div className="ct-sub">{c.role ? `${c.role} · ` : ''}{c.email}{c.phone ? ` · ${c.phone}` : ''}</div>
+                </div>
+                <div className="ct-actions">
+                  {!c.primary && <button onClick={() => makePrimary(i)}>Set primary</button>}
+                  <button onClick={() => startEditContact(i)}>Edit</button>
+                  <button onClick={() => deleteContact(i)}>Remove</button>
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+
+        <div style={{ borderTop: '1px solid var(--line)', paddingTop: 16, marginTop: 6 }}>
+          <div style={{ fontFamily: 'var(--display)', fontWeight: 700, fontSize: 13.5, marginBottom: 12 }}>{ctEditIndex !== null ? 'Edit contact' : 'Add a contact'}</div>
+          <div className="form-grid">
+            <Field label="Name" htmlFor="ct-name"><input id="ct-name" type="text" autoComplete="off" value={ctName} onChange={(e) => setCtName(e.target.value)} /></Field>
+            <Field label="Role" htmlFor="ct-role" hint="Optional"><input id="ct-role" type="text" placeholder="e.g. Branch manager" autoComplete="off" value={ctRole} onChange={(e) => setCtRole(e.target.value)} /></Field>
+            <Field label="Email" htmlFor="ct-email"><input id="ct-email" type="email" autoComplete="off" value={ctEmail} onChange={(e) => setCtEmail(e.target.value)} /></Field>
+            <Field label="Phone" htmlFor="ct-phone" hint="Optional"><input id="ct-phone" type="text" autoComplete="off" value={ctPhone} onChange={(e) => setCtPhone(e.target.value)} /></Field>
+            <label className="field span-2" style={{ flexDirection: 'row', alignItems: 'center', gap: 9, display: 'flex' }}>
+              <input type="checkbox" checked={ctPrimary} onChange={(e) => setCtPrimary(e.target.checked)} style={{ width: 'auto' }} />
+              <span style={{ fontSize: 13, color: 'var(--ink-soft)', fontWeight: 600, textTransform: 'none', letterSpacing: 0 }}>Primary contact (receives the deed by default)</span>
+            </label>
+          </div>
+          <div style={{ display: 'flex', gap: 10, marginTop: 14 }}>
+            <Button variant="primary" size="sm" onClick={submitContact}>{ctEditIndex !== null ? 'Save contact' : 'Add contact'}</Button>
+            {ctEditIndex !== null && <Button variant="ghost" size="sm" onClick={resetContactForm}>Cancel edit</Button>}
+          </div>
+        </div>
       </Modal>
     </>
   );

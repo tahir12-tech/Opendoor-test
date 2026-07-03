@@ -98,6 +98,47 @@
   color: var(--ink-soft);
   font-weight: 600;
 }
+
+/* MFA enrolment: QR tile + manual-key fallback. */
+.twofa-qr {
+  width: 188px;
+  height: 188px;
+  margin: 18px auto 16px;
+  padding: 14px;
+  background: #fff;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-md);
+  box-shadow: 0 1px 2px rgba(16, 16, 40, 0.06);
+  display: grid;
+  place-items: center;
+}
+.twofa-qr__img {
+  display: block;
+  width: 160px;
+  height: 160px;
+}
+.twofa-key {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0 0 4px;
+}
+.twofa-key__label {
+  font-size: 12px;
+  color: var(--ink-mute);
+}
+.twofa-key__code {
+  font-family: var(--mono, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace);
+  font-size: 13px;
+  letter-spacing: 0.06em;
+  color: var(--ink);
+  background: var(--white-lilac);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-sm, 8px);
+  padding: 9px 11px;
+  word-break: break-all;
+  text-align: center;
+}
 .twofa-chip svg {
   width: 15px;
   height: 15px;

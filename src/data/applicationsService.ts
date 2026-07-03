@@ -10,12 +10,64 @@
    - getApplicationDetail -> GET /applications/:ref.
    - createReferral -> POST /referrals (then Stripe for payment, PandaDoc
      for the deed; guarantee ref/issue/expiry assigned by the system).
-   - amendTenancyStart -> PATCH that enforces the 7-day window server-side
-     and reissues the Deed of Guarantee.
+   - amendTenancyStart -> PATCH that reissues the Deed of Guarantee with the
+     new tenancy start date and recomputes issue and expiry.
    ===================================================================== */
 import type { ApplicationDetail, ApplicationSummary, PartnerScope, Role, Status } from './types';
 import { ALL_PARTNERS } from './types';
-import { AGENT_ADDR, APPLICATION_RECORDS, APPLICATIONS_LIST, type AppRecord } from './mock/applications';
+import { AGENT_ADDR, APPLICATION_RECORDS as RECORDS_SEED, APPLICATIONS_LIST as LIST_SEED, type AppRecord } from './mock/applications';
+import { SUPABASE_ENABLED, sb } from '@/lib/supabase';
+
+// Working copies. Seeded from the mock; replaced from Supabase after login.
+let LIST: ApplicationSummary[] = LIST_SEED;
+let RECORDS: AppRecord[] = RECORDS_SEED;
+
+/** Replace the applications working copies from the back end (Supabase mode). */
+export function hydrateApplications(list: ApplicationSummary[], records: AppRecord[]): void {
+  LIST = list;
+  RECORDS = records;
+}
+
+/** The full scoped summary set (used by the activity feed). */
+export function allSummaries(): ApplicationSummary[] {
+  return LIST;
+}
+
+/** Full per-application record (real mode) for analytics and exports. */
+export interface FullApp {
+  ref: string;
+  partner: string;
+  agency: string;
+  branch: string;
+  referrer: string;
+  owner: number;
+  status: Status;
+  rent: number;
+  sentAt: Date | null;
+  paidAt: Date | null;
+  deedAt: Date | null;
+  tenancyStart: Date | null;
+  expiry: Date | null;
+  refunded: boolean;
+  refundedAt: Date | null;
+  refundedAmount: number | null;
+  refundAfterStart: boolean;
+  /** Deed sub-state while Paid: awaiting_tenant | executed | declined | voided | error | null. */
+  deedState: string | null;
+  deedSentAt: Date | null;
+}
+
+let FULL: FullApp[] = [];
+
+/** Replace the full application set from the back end (Supabase mode). */
+export function hydrateFull(rows: FullApp[]): void {
+  FULL = rows.slice();
+}
+
+/** The full application set (empty in mock mode). */
+export function allFull(): FullApp[] {
+  return FULL;
+}
 
 const STATUS_LABEL: Record<Status, string> = { sent: 'Sent', paid: 'Paid', deed: 'Deed Issued' };
 
@@ -36,7 +88,7 @@ export interface AppFilterOpts extends AppScopeOpts {
 
 /** Role + partner isolation only (drives counts and the "total" figure). */
 function scopedSet(opts: AppScopeOpts): ApplicationSummary[] {
-  let set = APPLICATIONS_LIST.slice();
+  let set = LIST.slice();
   if (opts.scope !== ALL_PARTNERS) set = set.filter((r) => r.partner === opts.scope);
   if (opts.role === 'referrer') set = set.filter((r) => r.owner);
   return set;
@@ -96,7 +148,7 @@ export function branchNamesForScope(opts: AppScopeOpts, agency?: string): string
 
 /** Find the parent agency of a branch (used when arriving filtered by ?branch=). */
 export function agencyOfBranch(branch: string): string | '' {
-  const rec = APPLICATIONS_LIST.find((r) => r.branch === branch);
+  const rec = LIST.find((r) => r.branch === branch);
   return rec ? rec.agency : '';
 }
 
@@ -118,9 +170,20 @@ function fmtLong(d: Date): string {
 function addDays(d: Date, n: number): Date {
   return new Date(d.getTime() + n * DAY);
 }
-function addYear(d: Date): Date {
-  return new Date(d.getFullYear() + 1, d.getMonth(), d.getDate());
+
+/**
+ * The single source of truth for the guarantee expiry date: the tenancy start
+ * date plus 12 months, minus one day. It is always computed from the tenancy
+ * start date, never from the deed issued or paid date.
+ * Example: tenancy start 15/06/2026 gives expiry 14/06/2027.
+ * Every screen and export that shows an expiry routes through this function.
+ */
+export function guaranteeExpiry(tenancyStart: Date): Date {
+  // Using a day component of (date - 1) rolls calendar boundaries correctly
+  // and avoids millisecond/DST drift.
+  return new Date(tenancyStart.getFullYear() + 1, tenancyStart.getMonth(), tenancyStart.getDate() - 1);
 }
+
 function deaccent(s: string): string {
   // Strip combining diacritical marks (U+0300–U+036F) after NFD decomposition.
   return s.normalize ? s.normalize('NFD').replace(/[̀-ͯ]/g, '') : s;
@@ -130,12 +193,12 @@ function initials(n: string): string {
 }
 
 export function findRecord(ref: string | null): AppRecord | null {
-  return APPLICATION_RECORDS.find((r) => r.ref === ref) ?? null;
+  return RECORDS.find((r) => r.ref === ref) ?? null;
 }
 
 export function getApplicationDetail(ref: string | null): ApplicationDetail {
-  const r = findRecord(ref) || APPLICATION_RECORDS[0];
-  const idx = APPLICATION_RECORDS.indexOf(r);
+  const r = findRecord(ref) || RECORDS[0];
+  const idx = RECORDS.indexOf(r);
   const event = parseISO(r.date);
   let sentAt: Date;
   let paidAt: Date | undefined;
@@ -189,9 +252,11 @@ export function getApplicationDetail(ref: string | null): ApplicationDetail {
     paidStr: paidAt ? `${fmtShort(paidAt)} · 16:09` : null,
     deedStr: deedAt ? `${fmtShort(deedAt)} · 09:41` : null,
     issue: deedAt ? fmtShort(deedAt) : null,
-    expiry: deedAt ? fmtShort(addYear(deedAt)) : null,
+    // Expiry is always tenancy start + 12 months - 1 day, never anchored on the deed date.
+    expiry: deedAt ? fmtShort(guaranteeExpiry(tenancyStart)) : null,
     annual: `£${annual.toLocaleString('en-GB')}`,
     paymentDate: paidAt || null,
+    owner: r.owner,
   };
 }
 
@@ -221,35 +286,121 @@ export interface CreateReferralInput {
  * then payment (Stripe) moves it to Paid and deed generation (PandaDoc) to
  * Deed Issued, assigning issue date and expiry. Mocked here as a new ref.
  */
-export function createReferral(_input: CreateReferralInput): { ref: string } {
-  const ref = `GR-${30000 + Math.floor(APPLICATIONS_LIST.length)}`;
-  return { ref };
+export interface CreateReferralResult {
+  ref: string;
+  paymentUrl: string | null;
+  emailSent: boolean;
+  emailError: string | null;
 }
 
-/** The amend window: the new start must be within 7 days either side of payment. */
-export const AMEND_WINDOW_DAYS = 7;
-
-export function amendWindow(payment: Date): { start: Date; end: Date } {
-  return { start: new Date(payment.getTime() - AMEND_WINDOW_DAYS * DAY), end: new Date(payment.getTime() + AMEND_WINDOW_DAYS * DAY) };
+export async function createReferral(input: CreateReferralInput): Promise<CreateReferralResult> {
+  if (!SUPABASE_ENABLED) {
+    return { ref: `GR-${30000 + Math.floor(LIST.length)}`, paymentUrl: null, emailSent: false, emailError: null };
+  }
+  // Creating the referral IS the send: the create-referral Edge Function validates
+  // and inserts (as the caller, so RLS + field rules apply), opens a Stripe test
+  // Checkout Session for the guarantor fee, and emails the tenant the branded
+  // payment email (redirected to the review address in test mode).
+  const origin = typeof window !== 'undefined' ? window.location.origin : '';
+  const { data, error } = await sb().functions.invoke('create-referral', {
+    body: {
+      agency: input.agency, branch: input.branch, origin,
+      title: input.title, firstName: input.firstName, lastName: input.lastName,
+      dob: input.dob || null, email: input.email, phone: input.phone,
+      addr1: input.addr1, addr2: input.addr2, city: input.city, county: input.county, postcode: input.postcode,
+      rent: input.rent, tenancyStart: input.tenancyStart || null,
+    },
+  });
+  if (error) {
+    let msg = error.message as string;
+    try {
+      const ctx = await (error as { context?: { json?: () => Promise<{ error?: string }> } }).context?.json?.();
+      if (ctx?.error) msg = ctx.error;
+    } catch { /* ignore */ }
+    throw new Error(msg || 'Could not create the referral.');
+  }
+  if (!data?.ok) throw new Error(data?.error || 'Could not create the referral.');
+  return { ref: data.ref, paymentUrl: data.paymentUrl ?? null, emailSent: !!data.emailSent, emailError: data.emailError ?? null };
 }
 
-export interface AmendResult {
-  ok: boolean;
-  reason?: string;
-  issue?: Date;
-  expiry?: Date;
+/** Resolve an application's DB id from its guarantee reference (Supabase mode). */
+async function appIdByRef(ref: string): Promise<string> {
+  const { data, error } = await sb().from('applications').select('id').eq('guarantee_ref', ref).maybeSingle();
+  if (error) throw new Error(error.message);
+  if (!data) throw new Error('Application not found.');
+  return (data as { id: string }).id;
 }
 
 /**
- * Amend the tenancy start date and reissue the deed.
- * INTEGRATION: PATCH /applications/:ref/tenancy-start — the 7-day-from-payment
- * rule MUST be enforced server-side, which then reissues the Deed of Guarantee
- * and recomputes issue/expiry. Mocked here by recomputing the dates.
+ * Persist a tenancy-start amendment via the amend_tenancy_start RPC, which
+ * re-checks canAmendTenancyStart (role/status/ownership) in the database.
+ * No-op in mock mode. The UI calculation is amendTenancyStart above.
  */
-export function amendTenancyStart(payment: Date, newStart: Date): AmendResult {
-  const win = amendWindow(payment);
-  if (newStart < win.start || newStart > win.end) {
-    return { ok: false, reason: `Must be within ${AMEND_WINDOW_DAYS} days of payment` };
-  }
-  return { ok: true, issue: new Date(2026, 5, 26), expiry: addYear(newStart) };
+export async function amendTenancyStartDb(ref: string, newStart: Date): Promise<void> {
+  if (!SUPABASE_ENABLED) return;
+  const iso = `${newStart.getFullYear()}-${String(newStart.getMonth() + 1).padStart(2, '0')}-${String(newStart.getDate()).padStart(2, '0')}`;
+  const { error } = await sb().rpc('amend_tenancy_start', { p_app: await appIdByRef(ref), p_new_start: iso });
+  if (error) throw new Error(error.message);
+}
+
+/**
+ * Send the issued deed to an agent via the send_deed_to_agent RPC, which
+ * re-checks canSendDeed and (for Referrers) restricts to the resolved contact.
+ * No-op in mock mode.
+ */
+export async function sendDeedToAgent(ref: string, recipientEmail?: string, saveContact?: boolean): Promise<void> {
+  if (!SUPABASE_ENABLED) return;
+  const { error } = await sb().rpc('send_deed_to_agent', {
+    p_app: await appIdByRef(ref),
+    p_recipient_email: recipientEmail ?? null,
+    p_save_contact: saveContact ?? false,
+  });
+  if (error) throw new Error(error.message);
+}
+
+/**
+ * Who may amend the tenancy start date, by payment status:
+ * - Before payment (Sent): any viewing role may amend; a Referrer only their
+ *   own application (there is no deed or cover period yet, so this is just
+ *   correcting application data).
+ * - After payment (Paid or Deed Issued): Management and opndoor admin only,
+ *   because it reissues the Deed of Guarantee and recomputes the expiry.
+ * The back end must enforce this rule independently.
+ */
+export function canAmendTenancyStart(role: Role, status: Status, ownedByReferrer: boolean): boolean {
+  if (status === 'sent') return role === 'referrer' ? ownedByReferrer : true;
+  return role === 'superadmin' || role === 'management';
+}
+
+/**
+ * Who may send the issued deed to the agent. Referrers may send, but only on
+ * their own application; Management and opndoor admin may send on any in scope.
+ * Referrers are send-only (no one-off recipient, no saving contacts) — that is
+ * enforced in the UI. The back end must enforce this rule independently.
+ */
+export function canSendDeed(role: Role, ownedByReferrer: boolean): boolean {
+  if (role === 'referrer') return ownedByReferrer;
+  return role === 'superadmin' || role === 'management';
+}
+
+export interface AmendResult {
+  /** True after payment (Paid/Deed Issued): the deed is reissued. */
+  reissued: boolean;
+  /** New issue and expiry when reissued, otherwise null. */
+  issue: Date | null;
+  expiry: Date | null;
+}
+
+/**
+ * Amend the tenancy start date. Any valid date is accepted; the form checks
+ * that the input is a real dd/mm/yyyy date that differs from the current start.
+ * Before payment (Sent) this just corrects the start date. After payment it
+ * reissues the Deed of Guarantee and recomputes the 12-month expiry.
+ * INTEGRATION: PATCH /applications/:ref/tenancy-start; the back end applies
+ * the same status rule and, after payment, reissues the deed.
+ */
+export function amendTenancyStart(status: Status, newStart: Date): AmendResult {
+  if (status === 'sent') return { reissued: false, issue: null, expiry: null };
+  // Reissue: the expiry recomputes from the new tenancy start (start + 12 months - 1 day).
+  return { reissued: true, issue: new Date(2026, 5, 26), expiry: guaranteeExpiry(newStart) };
 }
