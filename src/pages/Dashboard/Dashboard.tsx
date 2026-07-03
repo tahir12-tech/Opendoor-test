@@ -10,7 +10,7 @@
 import { useMemo, useState } from 'react';
 import {
   ALL_PARTNERS, buildApplicationDoc, buildBordereauCsv, buildPerformanceDoc, downloadCsv, exportBranded,
-  fmtBig, getCommissionSettlement, getDashboardData, getPartners, getPeriods, getTrend, partnerName,
+  fmtBig, getCommissionSettlement, getAgentCommissionSettlement, livePartnerBreakdown, getDashboardData, getPartners, getPeriods, getTrend, partnerName,
   type LeagueRow, type Period, type TrendRow,
 } from '@/data';
 import { BASIS_META, type ExportBasis } from '@/data';
@@ -80,11 +80,16 @@ export function Dashboard() {
   // accrual, net of refunds), payable on the 15th. Live mode only; ignores the
   // period filter (it is a fixed monthly settlement question).
   const settlement = useMemo(() => getCommissionSettlement(role, partnerScope), [role, partnerScope]);
+  // Agent commission settlement (agency level) and the per-partner commission
+  // breakdown for the selected period. Live mode, non-referrers.
+  const agentSettlement = useMemo(() => getAgentCommissionSettlement(role, partnerScope), [role, partnerScope]);
+  const partnerBreakdown = useMemo(() => livePartnerBreakdown(role, partnerScope, period), [role, partnerScope, period]);
   // Settlement is a money-reconciliation surface: show pence on every row and the
   // total so the rows always sum to the stated total (commission is rent x rate,
   // which is frequently a half-pound).
   const gbpPence = (n: number) => `£${n.toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
   const settleDate = `${settlement.settlementDate.getDate()} ${settlement.settlementDate.toLocaleDateString('en-GB', { month: 'long' })} ${settlement.settlementDate.getFullYear()}`;
+  const agentSettleDate = `${agentSettlement.settlementDate.getDate()} ${agentSettlement.settlementDate.toLocaleDateString('en-GB', { month: 'long' })} ${agentSettlement.settlementDate.getFullYear()}`;
   const dmyShort = (x: Date) => `${String(x.getDate()).padStart(2, '0')}/${String(x.getMonth() + 1).padStart(2, '0')}/${x.getFullYear()}`;
 
   const [measure, setMeasure] = useState<Record<ChartKey, Measure>>({ branch: 'value', agency: 'value', referrer: 'value' });
@@ -361,6 +366,88 @@ export function Dashboard() {
                           <tr key={ap.ref}>
                             <td>{ap.ref}</td>
                             <td>{ap.branch}{ap.agency ? ` · ${ap.agency}` : ''}</td>
+                            <td className="num">{dmyShort(ap.paidAt)}</td>
+                            <td className="num">{gbpPence(ap.rent)}</td>
+                            <td className="num">{gbpPence(ap.commission)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              ))}
+            </section>
+          </RoleOnly>
+        )}
+
+        {/* COMMISSION BY PARTNER (selected period) */}
+        {d.live && partnerBreakdown.length > 0 && (
+          <RoleOnly roles={['superadmin', 'management']}>
+            <section className="card settle">
+              <div className="settle__head">
+                <div>
+                  <div className="kpi__label">Commission by partner</div>
+                  <div className="muted" style={{ fontSize: 12.5, marginTop: 3 }}>
+                    Partner and agent commission for the selected period, gross and net of refunds. Net columns reconcile to the summary totals.
+                  </div>
+                </div>
+              </div>
+              <div className="settle__apps">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Partner</th><th className="num">Paid</th><th className="num">Fees (gross)</th>
+                      <th className="num">Partner comm (gross)</th><th className="num">Partner comm (net)</th>
+                      <th className="num">Agent comm (gross)</th><th className="num">Agent comm (net)</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {partnerBreakdown.map((p) => (
+                      <tr key={p.partner}>
+                        <td>{p.partnerName}</td>
+                        <td className="num">{p.paid}</td>
+                        <td className="num">{gbpPence(p.feesGross)}</td>
+                        <td className="num">{gbpPence(p.partnerCommGross)}</td>
+                        <td className="num">{gbpPence(p.partnerCommNet)}</td>
+                        <td className="num">{gbpPence(p.agentCommGross)}</td>
+                        <td className="num">{gbpPence(p.agentCommNet)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </section>
+          </RoleOnly>
+        )}
+
+        {/* AGENT COMMISSION SETTLEMENT (prior calendar month, agency level, payable 15th) */}
+        {d.live && agentSettlement.agencies.length > 0 && (
+          <RoleOnly roles={['superadmin', 'management']}>
+            <section className="card settle">
+              <div className="settle__head">
+                <div>
+                  <div className="kpi__label">Agent commission settlement</div>
+                  <div className="muted" style={{ fontSize: 12.5, marginTop: 3 }}>
+                    Agent commission accrued on payments in <b>{agentSettlement.monthLabel}</b> (calendar month, net of refunds), payable to each agency on the 15th.
+                  </div>
+                </div>
+              </div>
+              {agentSettlement.agencies.map((a) => (
+                <div key={`${a.partner}-${a.agency}`} className="settle__partner">
+                  <div className="settle__row">
+                    <span>Agent commission payable to <b>{a.agency}</b> on <b>{agentSettleDate}</b></span>
+                    <span className="settle__amt">{gbpPence(a.commission)}</span>
+                  </div>
+                  <div className="settle__apps">
+                    <table>
+                      <thead>
+                        <tr><th>Reference</th><th>Branch</th><th className="num">Paid</th><th className="num">Fee</th><th className="num">Agent commission</th></tr>
+                      </thead>
+                      <tbody>
+                        {a.apps.map((ap) => (
+                          <tr key={ap.ref}>
+                            <td>{ap.ref}</td>
+                            <td>{ap.branch}</td>
                             <td className="num">{dmyShort(ap.paidAt)}</td>
                             <td className="num">{gbpPence(ap.rent)}</td>
                             <td className="num">{gbpPence(ap.commission)}</td>

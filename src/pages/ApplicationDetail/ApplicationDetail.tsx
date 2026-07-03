@@ -64,6 +64,10 @@ const feedColor = (kind: string): string => {
 const BUSINESS_LABEL: Record<string, string> = {
   referral_created: 'Referral created and sent to the tenant',
   payment_email_sent: 'Payment email sent to the tenant',
+  payment_email_resent: 'Payment email resent to the tenant',
+  // Safety net: if a failure ever surfaces business-visible, partners see this
+  // clean copy, never the raw provider error (which stays opndoor-admin-only).
+  payment_email_failed: 'Payment email could not be sent; opndoor has been notified',
   deed_sent: 'Deed of Guarantee sent to the tenant for signature',
   deed_viewed: 'Deed viewed by the tenant',
   deed_signed: 'Deed signed by the tenant',
@@ -73,7 +77,8 @@ const BUSINESS_LABEL: Record<string, string> = {
   deed_regenerated: 'Deed regenerated and sent to the tenant',
   deed_declined: 'Tenant declined to sign; opndoor is reviewing',
   deed_issued: 'Deed of Guarantee issued',
-  tenancy_amended: 'Tenancy start amended',
+  // tenancy_amended intentionally omitted: its message carries the partner-safe
+  // old -> new detail, which should show to every viewer (not be genericised).
   deed_archived: 'Signed deed archived before amendment',
   deed_reissued: 'Deed reissued for signing',
 };
@@ -177,10 +182,23 @@ export function ApplicationDetail() {
   };
 
   const reached = d.status === 'sent' ? 1 : d.status === 'paid' ? 2 : 3;
+  // Third-node caption: on completion it states the outcome; while awaiting it
+  // surfaces the deed's signing journey (sent / viewed / not yet viewed). The
+  // three milestones themselves are unchanged.
+  let deedDate = d.deedStr || 'Awaiting deed';
+  let deedNote = d.deedStr ? 'Guarantee deed issued and stored' : 'Deed not yet issued';
+  if (d.status === 'deed') {
+    deedNote = 'Signed by tenant and issued';
+  } else if (paymentInfo?.deedState === 'awaiting_tenant') {
+    deedDate = 'Awaiting signature';
+    deedNote = paymentInfo.deedViewedAt
+      ? `Awaiting tenant signature · viewed ${fmtStamp(new Date(paymentInfo.deedViewedAt))}`
+      : `Sent ${paymentInfo.deedSentAt ? fmtStamp(new Date(paymentInfo.deedSentAt)) : ''}, not yet viewed`;
+  }
   const steps = [
     { label: 'Sent', date: d.sentStr, note: `Referral sent to tenant by ${d.referrer}` },
     { label: 'Paid', date: d.paidStr || 'Awaiting payment', note: d.paidStr ? `Guarantor fee paid · ${d.rent}` : 'Guarantor fee not yet paid' },
-    { label: 'Deed Issued', date: d.deedStr || 'Awaiting deed', note: d.deedStr ? 'Guarantee deed issued and stored' : 'Deed not yet issued' },
+    { label: 'Deed Issued', date: deedDate, note: deedNote },
   ];
 
   const isDeed = d.status === 'deed';
@@ -279,15 +297,21 @@ export function ApplicationDetail() {
       setDeedVersion((v) => v + 1);
       if (isDeed && result.issue && result.expiry) setAmendedDates({ issue: fmtShort(result.issue), expiry: fmtShort(result.expiry) });
     }
-    const who = role === 'superadmin' ? 'opndoor admin' : role === 'management' ? 'Management' : 'Referrer';
-    setExtraActivity((prev) => [
-      {
-        color: 'var(--heliotrope)',
-        text: result.reissued ? <>Tenancy start amended to <b>{fmtLong(parsed)}</b>; deed reissued</> : <>Tenancy start amended to <b>{fmtLong(parsed)}</b></>,
-        time: `${SUPABASE_ENABLED ? fmtStamp(new Date()) : fmtShort(NOW)} · ${who}`,
-      },
-      ...prev,
-    ]);
+    // Mock/demo mode only: an optimistic feed entry. In live mode the activity
+    // feed is sourced solely from the server activity_log (one entry per amend,
+    // written by the Edge Function) and refreshed by loadPayment below, so a
+    // client-side entry here would double-log and could claim a phantom reissue.
+    if (!SUPABASE_ENABLED) {
+      const who = role === 'superadmin' ? 'opndoor admin' : role === 'management' ? 'Management' : 'Referrer';
+      setExtraActivity((prev) => [
+        {
+          color: 'var(--heliotrope)',
+          text: result.reissued ? <>Tenancy start amended to <b>{fmtLong(parsed)}</b>; deed reissued</> : <>Tenancy start amended to <b>{fmtLong(parsed)}</b></>,
+          time: `${fmtShort(NOW)} · ${who}`,
+        },
+        ...prev,
+      ]);
+    }
     setAmendOpen(false);
     // The Edge Function's summary reflects what actually happened to the deed
     // (voided+regenerated, or archived+replaced); prefer it in live mode.
@@ -504,7 +528,13 @@ export function ApplicationDetail() {
                         </div>
                       </>
                     )}
-                    {lastEmailLog && <div className={`pay-note${lastEmailLog.kind === 'payment_email_failed' ? ' pay-note--warn' : ''}`}>{lastEmailLog.message}</div>}
+                    {lastEmailLog && (
+                      <div className={`pay-note${lastEmailLog.kind === 'payment_email_failed' ? ' pay-note--warn' : ''}`}>
+                        {lastEmailLog.kind === 'payment_email_failed' && !isAdmin
+                          ? 'Payment email could not be sent. Use the copy link above to share it with the tenant; opndoor has been notified.'
+                          : lastEmailLog.message}
+                      </div>
+                    )}
                   </>
                 )}
               </CardBody>

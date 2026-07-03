@@ -25,7 +25,7 @@ import { contactForApplication } from './orgService';
 import { getLeague } from './leagueService';
 import { SUPABASE_ENABLED } from '@/lib/supabase';
 import { periodRange as realPeriodRange, scopeFull, basisInPeriod, inRange } from './paymentMetrics';
-import { liveAvailable, liveAggregate, liveVolume, liveMonths, getCommissionSettlement } from './liveAnalytics';
+import { liveAvailable, liveAggregate, liveVolume, liveMonths, getCommissionSettlement, getAgentCommissionSettlement, livePartnerBreakdown } from './liveAnalytics';
 // Type-only import: building the document specs needs no runtime code, so the
 // heavy xlsx library is not pulled into the main bundle. It is dynamically
 // imported in exportBranded, on demand, when an export is actually run.
@@ -84,9 +84,11 @@ function toCSV(rows: CsvRow[]): string {
   return rows.map((r) => r.map((s) => `"${String(s).replace(/"/g, '""')}"`).join(',')).join('\r\n');
 }
 
-/** Trigger a browser download of a CSV string. */
+/** Trigger a browser download of a CSV string. Written UTF-8 with a BOM so Excel
+    reads £ and accented characters correctly (without the BOM it assumes the
+    legacy locale codepage and mangles them). */
 export function downloadCsv(csv: string, name: string): void {
-  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+  const blob = new Blob(['\ufeff' + csv], { type: 'text/csv;charset=utf-8;' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
@@ -186,8 +188,27 @@ function buildLivePerformanceDoc(role: Role, period: Period): BrandedExport {
   const r = getRatesFor(scope);
   const pPct = Math.round(r.partner * 100);
   const aPct = Math.round(r.agent * 100);
+  // Live breakdown columns carry net commission per row (partner + agent), so the
+  // agency/branch/referrer tables reconcile to the summary commission totals.
+  const LIVE_BREAKDOWN_COLS = (first: string, showParent: boolean, comm: [string, string]): Column[] => [
+    { header: first, type: 'text' },
+    ...(showParent ? [{ header: 'Parent agency', type: 'text' } as Column] : []),
+    { header: 'Referrals', type: 'int' },
+    { header: 'Fees collected', type: 'money' },
+    { header: 'Sent', type: 'int' },
+    { header: 'Paid', type: 'int' },
+    { header: 'Deed issued', type: 'int' },
+    { header: 'Sent to Deed', type: 'pct' },
+    { header: comm[0], type: 'money' },
+    { header: comm[1], type: 'money' },
+  ];
   const brk = (rows: LeagueRow[], showParent: boolean): TableRow[] =>
-    rows.map((e) => (showParent ? [e.name, e.sub, e.refs, e.fees, e.refs, e.paid, e.deed, e.refs ? e.deed / e.refs : 0] : [e.name, e.refs, e.fees, e.refs, e.paid, e.deed, e.refs ? e.deed / e.refs : 0]));
+    rows.map((e) => {
+      const base = showParent
+        ? [e.name, e.sub, e.refs, e.fees, e.refs, e.paid, e.deed, e.refs ? e.deed / e.refs : 0]
+        : [e.name, e.refs, e.fees, e.refs, e.paid, e.deed, e.refs ? e.deed / e.refs : 0];
+      return [...base, e.partnerComm, e.agentComm] as TableRow;
+    });
 
   const blocks: BrandedDoc['blocks'] = [
     { kind: 'section', title: 'Summary' },
@@ -238,13 +259,40 @@ function buildLivePerformanceDoc(role: Role, period: Period): BrandedExport {
     },
     { kind: 'blank' },
   ];
+  // Per-partner commission for the period (partner + agent, gross and net). The
+  // net columns sum to the summary's partner/agent commission totals.
   if (role !== 'referrer') {
-    blocks.push({ kind: 'section', title: 'Breakdown by agency' }, { kind: 'table', columns: BREAKDOWN_COLS('Agency', false), rows: brk(vol.agencies, false) }, { kind: 'blank' });
+    const pb = livePartnerBreakdown(role, scope, period);
+    blocks.push(
+      { kind: 'section', title: 'Commission by partner (this period)' },
+      {
+        kind: 'table',
+        columns: [
+          { header: 'Partner', type: 'text' },
+          { header: 'Paid', type: 'int' },
+          { header: 'Fees collected (gross)', type: 'money' },
+          { header: 'Partner commission (gross)', type: 'money2' },
+          { header: 'Partner commission (net)', type: 'money2' },
+          { header: 'Agent commission (gross)', type: 'money2' },
+          { header: 'Agent commission (net)', type: 'money2' },
+        ],
+        rows: pb.map((p) => [p.partnerName, p.paid, p.feesGross, p.partnerCommGross, p.partnerCommNet, p.agentCommGross, p.agentCommNet] as TableRow),
+      },
+      { kind: 'blank' },
+    );
   }
-  blocks.push({ kind: 'section', title: 'Breakdown by branch' }, { kind: 'table', columns: BREAKDOWN_COLS('Branch', true), rows: brk(vol.branches, true) }, { kind: 'blank' });
+  const NET_COMM: [string, string] = ['Partner commission (net)', 'Agent commission (net)'];
+  const ATTR_COMM: [string, string] = ['Attributed partner commission (net)', 'Attributed agent commission (net)'];
+  if (role !== 'referrer') {
+    blocks.push({ kind: 'section', title: 'Breakdown by agency' }, { kind: 'table', columns: LIVE_BREAKDOWN_COLS('Agency', false, NET_COMM), rows: brk(vol.agencies, false) }, { kind: 'blank' });
+  }
+  blocks.push({ kind: 'section', title: 'Breakdown by branch' }, { kind: 'table', columns: LIVE_BREAKDOWN_COLS('Branch', true, NET_COMM), rows: brk(vol.branches, true) }, { kind: 'blank' });
   blocks.push(
     { kind: 'section', title: role === 'referrer' ? 'Breakdown by month' : 'Breakdown by referrer' },
-    { kind: 'table', columns: BREAKDOWN_COLS(role === 'referrer' ? 'Month' : 'Referrer', false), rows: brk(vol.referrers, false) },
+    // The referrer figures are commission ATTRIBUTED to the referrals they generated
+    // (partner + agent share), for insight — not a payment owed to the referrer.
+    { kind: 'table', columns: LIVE_BREAKDOWN_COLS(role === 'referrer' ? 'Month' : 'Referrer', false, role === 'referrer' ? NET_COMM : ATTR_COMM), rows: brk(vol.referrers, false) },
+    ...(role !== 'referrer' ? [{ kind: 'keyvalue' as const, items: [{ label: 'Note', value: 'Referrer commission columns are attribution (commission generated by each referrer’s referrals), not a payment to the referrer.' }] }] : []),
     { kind: 'blank' },
   );
   blocks.push(
@@ -286,6 +334,33 @@ function buildLivePerformanceDoc(role: Role, period: Period): BrandedExport {
           { header: 'Partner commission', type: 'money2' },
         ],
         rows: st.partners.flatMap((p) => p.apps.map((ap) => [p.partnerName, ap.ref, ap.branch, ap.agency, dmy(ap.paidAt), ap.rent, ap.commission] as TableRow)),
+      });
+    }
+
+    // Agent commission settlement: mirrors the partner one, aggregated at agency
+    // level (payable to the letting agency), prior calendar month, net of refunds.
+    const ag = getAgentCommissionSettlement(role, scope);
+    const agDay = `${ag.settlementDate.getDate()}/${pad(ag.settlementDate.getMonth() + 1)}/${ag.settlementDate.getFullYear()}`;
+    blocks.push({ kind: 'blank' }, { kind: 'section', title: `Agent commission settlement (${ag.monthLabel}, payable ${agDay})` });
+    if (!ag.agencies.length) {
+      blocks.push({ kind: 'keyvalue', items: [{ label: 'Payable', value: 'No agent commission accrued in the prior calendar month.' }] });
+    } else {
+      blocks.push({
+        kind: 'keyvalue',
+        items: ag.agencies.map((a) => ({ label: `Agent commission payable to ${a.agency}`, value: a.commission, type: 'money2' as const })),
+      });
+      blocks.push({
+        kind: 'table',
+        columns: [
+          { header: 'Agency', type: 'text' },
+          { header: 'Partner', type: 'text' },
+          { header: 'Guarantee reference', type: 'text' },
+          { header: 'Branch', type: 'text' },
+          { header: 'Paid date', type: 'text' },
+          { header: 'Guarantor fee', type: 'money2' },
+          { header: 'Agent commission', type: 'money2' },
+        ],
+        rows: ag.agencies.flatMap((a) => a.apps.map((ap) => [a.agency, a.partnerName, ap.ref, ap.branch, dmy(ap.paidAt), ap.rent, ap.commission] as TableRow)),
       });
     }
   }
@@ -509,6 +584,7 @@ function buildRealApplicationDoc(role: Role, period: Period, basis: ExportBasis,
   const STATUS: Record<FullApp['status'], string> = { sent: 'Sent', paid: 'Paid', deed: 'Deed Issued' };
 
   const columns: Column[] = [
+    { header: 'Partner', type: 'text' },
     { header: 'Guarantee reference', type: 'text' },
     { header: 'Agency', type: 'text' },
     { header: 'Branch', type: 'text' },
@@ -540,7 +616,7 @@ function buildRealApplicationDoc(role: Role, period: Period, basis: ExportBasis,
     const partnerComm = a.refunded ? 0 : a.rent * rates.partner;
     const agentComm = a.refunded ? 0 : a.rent * rates.agent;
     const row: TableRow = [
-      a.ref, a.agency, a.branch, a.referrer, STATUS[a.status], payState,
+      partnerName(a.partner), a.ref, a.agency, a.branch, a.referrer, STATUS[a.status], payState,
       a.sentAt ? dmy(a.sentAt) : '', a.paidAt ? dmy(a.paidAt) : '', a.deedAt ? dmy(a.deedAt) : '',
       a.refundedAt ? dmy(a.refundedAt) : '', a.refundedAmount != null ? gbp(a.refundedAmount) : '',
       a.rent, a.rent, partnerComm, agentComm,

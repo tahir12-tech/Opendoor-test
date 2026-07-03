@@ -93,7 +93,7 @@ export async function hydrateFromSupabase(userId: string): Promise<void> {
         'payment_state, refunded_at, refunded_amount, paid_amount, refund_after_start, ' +
         'deed_state, deed_sent_at, deed_viewed_at, expiry_reminders_sent, ' +
         'referrer_id, branch_id, agency_id, partner_id, ' +
-        'branch:branches(name), agency:agencies(name), referrer:users!referrer_id(full_name), partner:partners(slug)',
+        'branch:branches(name), agency:agencies(name), referrer:users!referrer_id(full_name, role), partner:partners(slug)',
     ),
   ]);
 
@@ -234,6 +234,7 @@ export async function hydrateFromSupabase(userId: string): Promise<void> {
     agency: emb(a.agency)?.name ?? '',
     branch: emb(a.branch)?.name ?? '',
     referrer: emb(a.referrer)?.full_name ?? '',
+    referrerRole: (emb(a.referrer)?.role ?? null) as any,
     owner: ownerFlag(a),
     status: a.status as Status,
     rent: num(a.monthly_rent),

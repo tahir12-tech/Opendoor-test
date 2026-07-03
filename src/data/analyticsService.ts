@@ -20,8 +20,8 @@ import {
 import { getRatesFor, weightFor } from './partnersService';
 import { liveAvailable, liveAggregate, liveVolume, liveTrend, type LiveAgg, type TrendRow } from './liveAnalytics';
 export type { TrendRow } from './liveAnalytics';
-export { getCommissionSettlement } from './liveAnalytics';
-export type { CommissionSettlement, PartnerSettlement, SettlementApp } from './liveAnalytics';
+export { getCommissionSettlement, getAgentCommissionSettlement, livePartnerBreakdown } from './liveAnalytics';
+export type { CommissionSettlement, PartnerSettlement, SettlementApp, AgentCommissionSettlement, AgentSettlementAgency, PartnerCommissionRow } from './liveAnalytics';
 
 export function getPeriods(): Period[] {
   return PERIODS.map((p) => ({ ...p }));

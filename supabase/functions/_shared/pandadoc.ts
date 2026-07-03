@@ -56,6 +56,9 @@ export interface DeedApp {
   prop_city: string;
   prop_postcode: string;
   agent_email: string;
+  /** When true, this is a reissue after a tenancy-start amendment: the signing
+      email says the deed was updated and the previous document is now void. */
+  reissue?: boolean;
 }
 
 // The six merge tokens. The docx must define these token names (the naming is
@@ -114,14 +117,18 @@ export async function createAndSend(a: DeedApp): Promise<DeedResult> {
 
     // Explicit opndoor-branded notification copy (the sender display name itself
     // is account-level in PandaDoc, not settable per document; see the runbook).
+    // A reissue (after a tenancy-start amendment) uses distinct copy so the tenant
+    // knows the deed changed and the previous document is void.
+    const subject = a.reissue
+      ? `Your updated opndoor Deed of Guarantee, ${a.guarantee_ref}`
+      : `Your opndoor Deed of Guarantee, ${a.guarantee_ref}`;
+    const message = a.reissue
+      ? `Dear ${a.tenant_first_name} ${a.tenant_last_name}, your Deed of Guarantee has been updated to reflect a new tenancy start date of ${fmtDate(a.tenancy_start)}. The previous document is now void. Please review and sign this updated document to put your guarantee in place. Reference ${a.guarantee_ref}.`
+      : `Dear ${a.tenant_first_name} ${a.tenant_last_name}, your opndoor guarantor fee has been received and your Deed of Guarantee is ready to sign. Please review and sign the document to put your guarantee in place. Reference ${a.guarantee_ref}.`;
     const sendRes = await fetch(`${API}/documents/${docId}/send`, {
       method: "POST",
       headers: headers(),
-      body: JSON.stringify({
-        silent: false,
-        subject: `Your opndoor Deed of Guarantee, ${a.guarantee_ref}`,
-        message: `Dear ${a.tenant_first_name} ${a.tenant_last_name}, your opndoor guarantor fee has been received and your Deed of Guarantee is ready to sign. Please review and sign the document to put your guarantee in place. Reference ${a.guarantee_ref}.`,
-      }),
+      body: JSON.stringify({ silent: false, subject, message }),
     });
     if (!sendRes.ok) return { ok: false, documentId: docId, error: `PandaDoc send ${sendRes.status}: ${(await sendRes.text()).slice(0, 300)}` };
     return { ok: true, documentId: docId, issueDateIso: issue.iso };
@@ -311,8 +318,11 @@ export async function verifyWebhook(rawBody: string, signature: string): Promise
  * side; generation is blocked with a clear error if there is no agent contact).
  * Used on the Paid transition and by the manual retry.
  */
+// reissue = true when regenerating after a tenancy-start amendment: the signing
+// email uses updated copy, and the routine "deed sent" business entry is
+// suppressed so the amend caller can log a single combined amend entry.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-export async function generateDeed(service: any, appId: string): Promise<DeedResult> {
+export async function generateDeed(service: any, appId: string, reissue = false): Promise<DeedResult> {
   const { data: app } = await service
     .from("applications")
     .select("id, guarantee_ref, tenant_first_name, tenant_last_name, tenant_email, tenancy_start, prop_addr1, prop_addr2, prop_city, prop_postcode, branch_id")
@@ -329,7 +339,7 @@ export async function generateDeed(service: any, appId: string): Promise<DeedRes
     return { ok: false, error: "No agent contact for this branch. Add one, then retry." };
   }
 
-  const res = await createAndSend({ ...app, agent_email: agentEmail });
+  const res = await createAndSend({ ...app, agent_email: agentEmail, reissue });
   if (!res.ok) {
     await service.from("applications").update({ deed_state: "error" }).eq("id", appId);
     await service.from("activity_log").insert({ application_id: appId, kind: "deed_error", message: `Deed generation failed: ${res.error}`, actor: "System", visibility: "internal" });
@@ -340,6 +350,8 @@ export async function generateDeed(service: any, appId: string): Promise<DeedRes
   // deed_viewed_at is reset so a freshly sent (or regenerated) deed starts as "not
   // yet viewed" for the new document.
   await service.from("applications").update({ pandadoc_document_id: res.documentId, deed_state: "awaiting_tenant", deed_sent_at: new Date().toISOString(), deed_viewed_at: null, issue_date: res.issueDateIso ?? null }).eq("id", appId);
-  await service.from("activity_log").insert({ application_id: appId, kind: "deed_sent", message: "Deed of Guarantee sent to the tenant for signature.", actor: "System" });
+  if (!reissue) {
+    await service.from("activity_log").insert({ application_id: appId, kind: "deed_sent", message: "Deed of Guarantee sent to the tenant for signature.", actor: "System" });
+  }
   return res;
 }

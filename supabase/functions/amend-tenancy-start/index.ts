@@ -23,6 +23,12 @@ const cors = {
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { ...cors, "Content-Type": "application/json" } });
 
+/** yyyy-mm-dd (or ISO) -> dd/mm/yyyy for the activity message. */
+function dmy(iso: string | null): string {
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(iso ?? "");
+  return m ? `${m[3]}/${m[2]}/${m[1]}` : (iso ?? "");
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: cors });
   try {
@@ -43,14 +49,19 @@ Deno.serve(async (req) => {
       if (prof?.full_name) actor = prof.full_name;
     }
 
-    // RLS-scoped read of the pre-amend state (drives the deed orchestration below).
+    // RLS-scoped read of the pre-amend state (drives the deed orchestration and
+    // gives the OLD tenancy start for the activity message).
     const { data: app, error: readErr } = await userClient
       .from("applications")
-      .select("id, guarantee_ref, status, deed_state, pandadoc_document_id, executed_pdf_path")
+      .select("id, guarantee_ref, status, deed_state, pandadoc_document_id, executed_pdf_path, tenancy_start")
       .eq("guarantee_ref", ref)
       .maybeSingle();
     if (readErr) return json({ ok: false, error: readErr.message }, 400);
     if (!app) return json({ ok: false, error: "Application not found, or you do not have access to it." }, 404);
+
+    const oldDmy = dmy(app.tenancy_start);
+    const newDmy = dmy(newStart);
+    const dateChange = `from ${oldDmy} to ${newDmy}`;
 
     // 1) Permission + date update, enforced in the database (deed-state aware).
     const { error: rpcErr } = await userClient.rpc("amend_tenancy_start", { p_app: app.id, p_new_start: newStart });
@@ -58,39 +69,66 @@ Deno.serve(async (req) => {
 
     const service = createClient(SUPABASE_URL, SERVICE);
 
+    // Exactly one BUSINESS activity entry per amend, attributed by name, stating
+    // old -> new. "The deed was reissued for signing" is appended ONLY when a
+    // regeneration actually ran. Supporting steps (archive / void) are separate:
+    // the archive entry references the amend; the void is an internal detail.
+    const logAmend = (suffix: string) =>
+      service.from("activity_log").insert({
+        application_id: app.id, kind: "tenancy_amended",
+        message: `Tenancy start amended ${dateChange} by ${actor}.${suffix}`,
+        actor, visibility: "business",
+      });
+
     // 2) Deed lifecycle, keyed on the state at amend time.
     if (app.deed_state === "executed" || app.status === "deed") {
-      // Archive the signed PDF before replacing it.
-      if (app.executed_pdf_path) {
+      // Archive the signed PDF before replacing it (the entry references the amend).
+      // Only claim an archive when there actually was a stored PDF to archive.
+      const archived = !!app.executed_pdf_path;
+      if (archived) {
         const archivePath = `${app.id}/archive/${app.guarantee_ref}-superseded-${app.pandadoc_document_id ?? "deed"}.pdf`;
         await service.storage.from("deeds").copy(app.executed_pdf_path, archivePath);
-        await service.from("activity_log").insert({ application_id: app.id, kind: "deed_archived", message: `Signed deed archived before amendment by ${actor}.`, actor, visibility: "business" });
+        await service.from("activity_log").insert({ application_id: app.id, kind: "deed_archived", message: `Signed deed archived before amending the tenancy start ${dateChange}, by ${actor}.`, actor, visibility: "business" });
       }
+      const archivePhrase = archived ? "The signed deed was archived and a" : "A";
       // Reopen to Paid and clear the executed deed, then issue a replacement.
       await service.from("applications").update({
         status: "paid", deed_state: null, deed_issued_at: null, deed_executed_at: null,
         issue_date: null, executed_pdf_path: null, pandadoc_document_id: null, deed_viewed_at: null,
       }).eq("id", app.id);
-      const gen = await generateDeed(service, app.id);
-      if (!gen.ok) return json({ ok: false, error: `Tenancy start amended and the signed deed archived, but the replacement failed: ${gen.error}` }, 200);
-      await service.from("activity_log").insert({ application_id: app.id, kind: "deed_reissued", message: `Tenancy start amended; signed deed archived and a replacement issued for signing by ${actor}.`, actor, visibility: "business" });
-      return json({ ok: true, message: "Tenancy start amended. The signed deed was archived and a replacement sent to the tenant to sign." });
+      const gen = await generateDeed(service, app.id, true);
+      if (!gen.ok) {
+        // The date change already committed: always leave exactly one amend entry,
+        // without a reissue clause (no regeneration ran).
+        await logAmend(`${archived ? " The signed deed was archived." : ""} The replacement deed could not be issued automatically; opndoor has been notified.`);
+        return json({ ok: false, error: `Tenancy start amended${archived ? " and the signed deed archived" : ""}, but the replacement failed: ${gen.error}` }, 200);
+      }
+      await logAmend(` ${archivePhrase} replacement was reissued for signing.`);
+      return json({ ok: true, message: `Tenancy start amended.${archived ? " The signed deed was archived and a replacement" : " A replacement deed was"} sent to the tenant to sign.` });
     }
 
     if (app.deed_state === "awaiting_tenant" && app.pandadoc_document_id) {
       // Void the outstanding unsigned document and regenerate with the new date.
+      // The void is an internal detail (not a separate business entry).
       const voided = await voidDocument(app.pandadoc_document_id);
-      if (!voided.ok) return json({ ok: false, error: `Tenancy start amended, but voiding the outstanding deed failed: ${voided.error}` }, 200);
+      if (!voided.ok) {
+        await logAmend(" The outstanding deed could not be voided automatically; opndoor has been notified.");
+        return json({ ok: false, error: `Tenancy start amended, but voiding the outstanding deed failed: ${voided.error}` }, 200);
+      }
       await service.from("applications").update({ pandadoc_document_id: null, deed_state: null, deed_viewed_at: null }).eq("id", app.id);
-      await service.from("activity_log").insert({ application_id: app.id, kind: "deed_voided", message: `Outstanding deed voided for a tenancy-start amendment by ${actor}.`, actor, visibility: "business" });
-      const gen = await generateDeed(service, app.id);
-      if (!gen.ok) return json({ ok: false, error: `Tenancy start amended, but the corrected deed failed: ${gen.error}` }, 200);
-      await service.from("activity_log").insert({ application_id: app.id, kind: "deed_regenerated", message: `Corrected deed generated after tenancy-start amendment by ${actor}.`, actor, visibility: "business" });
+      await service.from("activity_log").insert({ application_id: app.id, kind: "deed_voided", message: `Outstanding deed voided for a tenancy-start amendment ${dateChange} by ${actor}.`, actor, visibility: "internal" });
+      const gen = await generateDeed(service, app.id, true);
+      if (!gen.ok) {
+        // Date change committed; log the amend regardless (no reissue clause).
+        await logAmend(" The outstanding deed was voided; the corrected deed could not be issued automatically and opndoor has been notified.");
+        return json({ ok: false, error: `Tenancy start amended, but the corrected deed failed: ${gen.error}` }, 200);
+      }
+      await logAmend(" The outstanding deed was voided and reissued for signing.");
       return json({ ok: true, message: "Tenancy start amended. The outstanding deed was replaced with a corrected one." });
     }
 
-    // Sent, or Paid with no live deed (error / declined / voided / none).
-    await service.from("activity_log").insert({ application_id: app.id, kind: "tenancy_amended", message: `Tenancy start amended by ${actor}.`, actor, visibility: "business" });
+    // Sent, or Paid with no live deed (error / declined / voided / none): no reissue.
+    await logAmend("");
     return json({ ok: true, message: "Tenancy start amended." });
   } catch (e) {
     return json({ ok: false, error: e instanceof Error ? e.message : "Unexpected error." }, 500);

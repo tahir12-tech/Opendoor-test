@@ -40,6 +40,9 @@ export interface FullApp {
   agency: string;
   branch: string;
   referrer: string;
+  /** The referring user's actual role (superadmin/management/referrer), so the
+      league can label who generated the referral truthfully. */
+  referrerRole?: Role | null;
   owner: number;
   status: Status;
   rent: number;

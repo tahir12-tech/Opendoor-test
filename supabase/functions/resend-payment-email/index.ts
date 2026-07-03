@@ -66,6 +66,9 @@ Deno.serve(async (req) => {
       kind: emailRes.ok ? "payment_email_resent" : "payment_email_failed",
       message: emailRes.ok ? `Payment email resent (test mode) to ${emailRes.to} by ${actor}.` : `Payment email resend failed: ${emailRes.error}`,
       actor,
+      // A failure carries the raw provider error, so keep it opndoor-admin-only
+      // (the partner-safe copy is shown on the payment card). Success is business.
+      visibility: emailRes.ok ? "business" : "internal",
     });
 
     if (!emailRes.ok) return json({ ok: false, error: emailRes.error }, 200);

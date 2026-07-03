@@ -28,6 +28,7 @@ export const NAV: NavGroup[] = [
     items: [
       { id: 'dashboard', label: 'Dashboard', to: '/dashboard', icon: 'dashboard', roles: ['superadmin', 'management', 'referrer'] },
       { id: 'applications', label: 'Applications', to: '/applications', icon: 'apps', roles: ['superadmin', 'management', 'referrer'] },
+      { id: 'league', label: 'League', to: '/league', icon: 'trend', roles: ['superadmin', 'management', 'referrer'] },
       { id: 'new', label: 'New application', to: '/new-application', icon: 'plus', roles: ['superadmin', 'management', 'referrer'] },
     ],
   },
