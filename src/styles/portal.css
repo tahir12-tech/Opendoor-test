@@ -247,6 +247,7 @@ h1, h2, h3, h4 { font-family: var(--display); margin: 0; color: var(--ink); lett
 .tb-pop__row-t { font-size: 13px; color: var(--ink); font-weight: 500; line-height: 1.4; }
 .tb-pop__row-t b { font-weight: 700; }
 .tb-pop__row-s { font-size: 12px; color: var(--ink-mute); margin-top: 2px; }
+.tb-pop__empty { font-size: 13px; color: var(--ink-mute); text-align: center; padding: 18px 12px; }
 .tb-pop__foot { border-top: 1px solid var(--line); margin-top: 4px; padding: 10px 12px 6px; text-align: center; }
 .tb-pop__foot a { font-size: 13px; font-weight: 700; color: var(--heliotrope-deep); }
 .tb-pop__foot a:hover { text-decoration: underline; }

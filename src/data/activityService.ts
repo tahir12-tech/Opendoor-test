@@ -15,7 +15,7 @@ import type { ActivityEntry, ActivityKind, ExpiryBand, PartnerScope, Role, Upcom
 import { ALL_PARTNERS } from './types';
 import { UPCOMING_GUARANTEES, type UpcomingGuaranteeSeed } from './mock/guarantees';
 import { allSummaries, guaranteeExpiry } from './applicationsService';
-import { SUPABASE_ENABLED } from '@/lib/supabase';
+import { SUPABASE_ENABLED, sb } from '@/lib/supabase';
 
 const DAY = 86400000;
 
@@ -117,4 +117,77 @@ export function getUpcomingExpiries(opts: ActivityScope): UpcomingExpiry[] {
     })
     .filter((e) => e.daysUntil >= 0) // upcoming only
     .sort((a, b) => a.expiry.getTime() - b.expiry.getTime());
+}
+
+/* ---------- Topbar notifications ---------- */
+
+export interface NotificationItem {
+  ref: string;
+  text: string;
+  dot: 'sent' | 'paid' | 'deed' | 'other';
+  /** Pre-formatted honest relative time (live), or the demo string (mock). */
+  time: string;
+}
+
+// Mock/test mode keeps the illustrative demo entries.
+const DEMO_NOTIFICATIONS: NotificationItem[] = [
+  { ref: 'GR-20455', text: 'Chen Wei reached Paid', dot: 'paid', time: '14 minutes ago' },
+  { ref: 'GR-20418', text: 'Deed issued for Amelia Hartley', dot: 'deed', time: '1 hour ago' },
+  { ref: 'GR-20518', text: 'New referral sent to Omar Farouk', dot: 'sent', time: '3 hours ago' },
+];
+
+const NOTIF_KINDS = ['referral_created', 'payment_received', 'deed_sent', 'deed_signed', 'deed_issued', 'refunded', 'expiry_reminder'];
+
+function relTime(at: Date): string {
+  const mins = Math.round((Date.now() - at.getTime()) / 60000);
+  if (mins < 1) return 'Just now';
+  if (mins < 60) return `${mins} minute${mins === 1 ? '' : 's'} ago`;
+  const hrs = Math.round(mins / 60);
+  if (hrs < 24) return `${hrs} hour${hrs === 1 ? '' : 's'} ago`;
+  const days = Math.round(hrs / 24);
+  if (days === 1) return 'Yesterday';
+  if (days < 7) return `${days} days ago`;
+  return `${Math.round(days / 7)} week${Math.round(days / 7) === 1 ? '' : 's'} ago`;
+}
+
+function notifLabel(kind: string, tenant: string): { text: string; dot: NotificationItem['dot'] } {
+  switch (kind) {
+    case 'referral_created': return { text: `New referral sent to ${tenant}`, dot: 'sent' };
+    case 'payment_received': return { text: `${tenant} reached Paid`, dot: 'paid' };
+    case 'deed_sent': return { text: `Deed sent for signature to ${tenant}`, dot: 'sent' };
+    case 'deed_signed':
+    case 'deed_issued': return { text: `Deed issued for ${tenant}`, dot: 'deed' };
+    case 'refunded': return { text: `Guarantor fee refunded for ${tenant}`, dot: 'other' };
+    case 'expiry_reminder': return { text: `Guarantee expiring for ${tenant}`, dot: 'other' };
+    default: return { text: `Update for ${tenant}`, dot: 'other' };
+  }
+}
+
+/**
+ * Recent notifications for the signed-in viewer. Live mode reads the real
+ * activity_log, scoped exactly by RLS (own referrals for a Referrer, partner for
+ * Management, all for admin) and to business-visibility milestones, with honest
+ * relative times. Mock/test mode keeps the demo entries. Never shows another
+ * partner's data.
+ */
+export async function getNotifications(): Promise<NotificationItem[]> {
+  if (!SUPABASE_ENABLED) return DEMO_NOTIFICATIONS;
+  const { data, error } = await sb()
+    .from('activity_log')
+    .select('kind, at, application:applications!inner(guarantee_ref, tenant_first_name, tenant_last_name)')
+    .eq('visibility', 'business')
+    .in('kind', NOTIF_KINDS)
+    .order('at', { ascending: false })
+    .limit(8);
+  if (error || !data) return [];
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  return (data as any[])
+    .map((row) => {
+      const app = row.application;
+      if (!app?.guarantee_ref) return null;
+      const tenant = `${app.tenant_first_name ?? ''} ${app.tenant_last_name ?? ''}`.trim() || app.guarantee_ref;
+      const { text, dot } = notifLabel(row.kind, tenant);
+      return { ref: app.guarantee_ref, text, dot, time: relTime(new Date(row.at)) } as NotificationItem;
+    })
+    .filter((n): n is NotificationItem => n !== null);
 }

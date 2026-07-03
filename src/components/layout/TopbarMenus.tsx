@@ -1,15 +1,21 @@
 /* =====================================================================
-   Topbar popovers — Help & support and Notifications (from portal.js).
+   Topbar popovers — Help & support and Notifications.
    The parent Topbar coordinates which one is open (only one at a time).
    Notification rows deep-link to application detail routes.
 
-   INTEGRATION: notifications would be driven by real events (payment
-   received, deed issued, referral sent).
+   Notifications are driven by real events: in live mode getNotifications reads
+   the RLS-scoped activity_log (the viewer's own referrals / partner / all), so
+   no cross-partner data ever appears. Mock mode keeps the demo entries.
    ===================================================================== */
 import { Link } from 'react-router-dom';
 import { Icon } from '@/components/ui/Icon';
+import type { NotificationItem } from '@/data';
 
 type Pop = 'help' | 'notif' | null;
+
+const DOT: Record<NotificationItem['dot'], string> = {
+  sent: 'var(--sent)', paid: 'var(--paid)', deed: 'var(--deed)', other: 'var(--heliotrope)',
+};
 
 export function HelpMenu({ open, onToggle }: { open: boolean; onToggle: () => void }) {
   return (
@@ -50,49 +56,44 @@ export function HelpMenu({ open, onToggle }: { open: boolean; onToggle: () => vo
   );
 }
 
-export function NotificationsMenu({ open, onToggle, read, onClear }: { open: boolean; onToggle: () => void; read: boolean; onClear: () => void }) {
+export function NotificationsMenu({ open, onToggle, read, onClear, items }: { open: boolean; onToggle: () => void; read: boolean; onClear: () => void; items: NotificationItem[] }) {
   const dim = { opacity: read ? 0.25 : 1 };
+  const hasItems = items.length > 0;
   return (
     <div className={`tb-pop${open ? ' is-open' : ''}`}>
       <button className="iconbtn" aria-label="Notifications" onClick={onToggle}>
         <Icon name="bell" />
-        {!read && <span className="iconbtn__dot" />}
+        {!read && hasItems && <span className="iconbtn__dot" />}
       </button>
       <div className="tb-pop__menu">
         <div className="tb-pop__head">
           <span className="tb-pop__title">Notifications</span>
-          <button
-            className="tb-pop__clear"
-            onClick={(e) => {
-              e.preventDefault();
-              e.stopPropagation();
-              onClear();
-            }}
-          >
-            Mark all read
-          </button>
+          {hasItems && (
+            <button
+              className="tb-pop__clear"
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                onClear();
+              }}
+            >
+              Mark all read
+            </button>
+          )}
         </div>
-        <Link className="tb-pop__row" to="/applications/GR-20455">
-          <span className="tb-pop__dot" style={{ background: 'var(--paid)', ...dim }} />
-          <div>
-            <div className="tb-pop__row-t">Chen Wei reached <b>Paid</b></div>
-            <div className="tb-pop__row-s">GR-20455 · 14 minutes ago</div>
-          </div>
-        </Link>
-        <Link className="tb-pop__row" to="/applications/GR-20418">
-          <span className="tb-pop__dot" style={{ background: 'var(--deed)', ...dim }} />
-          <div>
-            <div className="tb-pop__row-t">Deed issued for <b>Amelia Hartley</b></div>
-            <div className="tb-pop__row-s">GR-20418 · 1 hour ago</div>
-          </div>
-        </Link>
-        <Link className="tb-pop__row" to="/applications/GR-20518">
-          <span className="tb-pop__dot" style={{ background: 'var(--sent)', ...dim }} />
-          <div>
-            <div className="tb-pop__row-t">New referral sent to <b>Omar Farouk</b></div>
-            <div className="tb-pop__row-s">GR-20518 · 3 hours ago</div>
-          </div>
-        </Link>
+        {hasItems ? (
+          items.map((n, i) => (
+            <Link className="tb-pop__row" to={`/applications/${n.ref}`} key={`${n.ref}-${i}`}>
+              <span className="tb-pop__dot" style={{ background: DOT[n.dot], ...dim }} />
+              <div>
+                <div className="tb-pop__row-t">{n.text}</div>
+                <div className="tb-pop__row-s">{n.ref} · {n.time}</div>
+              </div>
+            </Link>
+          ))
+        ) : (
+          <div className="tb-pop__empty">No new notifications.</div>
+        )}
         <div className="tb-pop__foot">
           <Link to="/activity">View all activity</Link>
         </div>

@@ -3,19 +3,29 @@
    role switcher and the help + notifications popovers. Ported from
    portal.js buildTopbar. The hamburger toggles the mobile nav drawer.
    ===================================================================== */
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { usePageMetaValue } from './pageMeta';
 import { RoleSwitch } from './RoleSwitch';
 import { HelpMenu, NotificationsMenu, type Pop } from './TopbarMenus';
 import { Icon } from '@/components/ui/Icon';
 import { useOnClickOutside } from '@/hooks/useOnClickOutside';
+import { getNotifications, type NotificationItem } from '@/data';
 
 export function Topbar({ onMenu }: { onMenu: () => void }) {
   const { title, crumbs } = usePageMetaValue();
   const [pop, setPop] = useState<Pop>(null);
   const [notifRead, setNotifRead] = useState(false);
+  const [notifs, setNotifs] = useState<NotificationItem[]>([]);
   const actionsRef = useRef<HTMLDivElement>(null);
   useOnClickOutside(actionsRef, () => setPop(null), pop !== null);
+
+  // Real, RLS-scoped notifications for the signed-in viewer (demo entries in mock
+  // mode). Refetched when the panel is opened so relative times stay honest.
+  useEffect(() => {
+    let cancelled = false;
+    getNotifications().then((n) => { if (!cancelled) setNotifs(n); }).catch(() => {});
+    return () => { cancelled = true; };
+  }, [pop === 'notif']);
 
   const toggle = (which: Exclude<Pop, null>) => setPop((cur) => (cur === which ? null : which));
 
@@ -47,7 +57,7 @@ export function Topbar({ onMenu }: { onMenu: () => void }) {
       <div className="topbar__actions" ref={actionsRef}>
         <RoleSwitch />
         <HelpMenu open={pop === 'help'} onToggle={() => toggle('help')} />
-        <NotificationsMenu open={pop === 'notif'} onToggle={() => toggle('notif')} read={notifRead} onClear={() => setNotifRead(true)} />
+        <NotificationsMenu open={pop === 'notif'} onToggle={() => toggle('notif')} read={notifRead} onClear={() => setNotifRead(true)} items={notifs} />
       </div>
     </>
   );
