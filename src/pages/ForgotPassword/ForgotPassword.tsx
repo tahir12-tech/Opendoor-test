@@ -1,13 +1,15 @@
 /* =====================================================================
    Forgot password — email entry, then a neutral "if an account exists"
-   confirmation. UI only.
+   confirmation.
 
-   PENDING: password reset is still stubbed (authService.requestPasswordReset is
-   a no-op). To go live, send the reset email via Supabase (resetPasswordForEmail)
-   and add a set-new-password page to consume the redirect token.
+   Live: the submit invokes authService.requestPasswordReset, which sends a
+   branded reset email (send-password-reset Edge Function) that lands on
+   /reset-password. The confirmation is identical whether or not the address has
+   an account (no enumeration). The email is prefilled from the sign-in form via
+   the ?email= query param (#60).
    ===================================================================== */
 import { useState, type FormEvent } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { authService } from '@/data';
 import { Button } from '@/components/ui/Button';
 import { Icon } from '@/components/ui/Icon';
@@ -17,13 +19,21 @@ import './ForgotPassword.css';
 
 export function ForgotPassword() {
   useDocumentTitle('Reset password');
+  const [params] = useSearchParams();
   const [sent, setSent] = useState(false);
-  const [email, setEmail] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [email, setEmail] = useState(() => (params.get('email') ?? '').trim());
 
-  function submit(e: FormEvent) {
+  async function submit(e: FormEvent) {
     e.preventDefault();
-    authService.requestPasswordReset(email.trim());
-    setSent(true);
+    if (busy) return;
+    setBusy(true);
+    // Always land on the neutral confirmation, regardless of the send outcome,
+    // so an outage or an unknown address never reveals account existence.
+    try { await authService.requestPasswordReset(email.trim()); } finally {
+      setBusy(false);
+      setSent(true);
+    }
   }
 
   return (
@@ -68,7 +78,7 @@ export function ForgotPassword() {
                   <label htmlFor="email">Work email</label>
                   <input id="email" type="email" placeholder="you@foxglove-residential.co.uk" autoComplete="email" value={email} onChange={(e) => setEmail(e.target.value)} required />
                 </div>
-                <Button variant="primary" block type="submit" arrow>Send reset link</Button>
+                <Button variant="primary" block type="submit" arrow disabled={busy || !email.trim()}>{busy ? 'Sending…' : 'Send reset link'}</Button>
               </form>
               <p className="auth__foot">Remembered it? <Link to="/login">Back to sign in</Link></p>
             </div>
@@ -81,7 +91,7 @@ export function ForgotPassword() {
               <div className="auth__form">
                 <Button variant="primary" block to="/login">Back to sign in</Button>
               </div>
-              <p className="auth__foot">Didn't get it? Check your spam folder, or <a href="#" onClick={(e) => { e.preventDefault(); }}>send it again</a>. Still stuck? Ask your administrator or use the contact details on the sign-in screen.</p>
+              <p className="auth__foot">Didn't get it? Check your spam folder, or <a href="#" onClick={async (e) => { e.preventDefault(); if (busy) return; setBusy(true); try { await authService.requestPasswordReset(email.trim()); } finally { setBusy(false); } }}>{busy ? 'sending…' : 'send it again'}</a>. Still stuck? Ask your administrator or use the contact details on the sign-in screen.</p>
             </div>
           )}
         </div>

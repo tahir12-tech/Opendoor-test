@@ -8,7 +8,7 @@
    an AAL1 session; enrolling or verifying a TOTP factor steps up to AAL2, which
    the database requires before it returns any data.
    ===================================================================== */
-import { sb } from '@/lib/supabase';
+import { SUPABASE_ENABLED, sb } from '@/lib/supabase';
 
 export interface LoginResult {
   ok: boolean;
@@ -36,8 +36,23 @@ export function verify2fa(_code: string): { ok: boolean } {
   return { ok: true };
 }
 
-/** Mocked as a no-op. */
-export function requestPasswordReset(_email: string): { ok: boolean } {
+/**
+ * Self-service password reset. In Supabase mode this invokes the
+ * send-password-reset Edge Function, which generates a recovery link and emails
+ * it via the branded Resend template (redirected to the review address in this
+ * test build). It ALWAYS resolves ok and never reveals whether the address has
+ * an account (no enumeration); the UI shows the neutral "if an account exists"
+ * confirmation regardless. No-op in mock mode.
+ */
+export async function requestPasswordReset(email: string): Promise<{ ok: boolean }> {
+  if (!SUPABASE_ENABLED) return { ok: true };
+  try {
+    const origin = typeof window !== 'undefined' ? window.location.origin : '';
+    await sb().functions.invoke('send-password-reset', { body: { email: email.trim(), origin } });
+  } catch {
+    // Swallow: the confirmation is intentionally identical whether or not the
+    // send succeeded, so an outage never leaks account existence.
+  }
   return { ok: true };
 }
 

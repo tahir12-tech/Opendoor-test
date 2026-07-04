@@ -17,6 +17,7 @@ export const KEYS = {
   role: 'grp_role',
   partner: 'grp_partner',
   period: 'grp_period',
+  notifRead: 'grp_notif_read_v1', // per-user "notifications last read" timestamps
 } as const;
 
 export function loadJSON<T>(key: string, fallback: T): T {

@@ -51,8 +51,19 @@ Deno.serve(async (req) => {
       if (prof?.full_name) actor = prof.full_name;
     }
 
-    const { data: branch, error: brErr } = await userClient
-      .from("branches").select("id, agencies!inner(name)").eq("name", b.branch).eq("agencies.name", b.agency).limit(1).maybeSingle();
+    // Resolve the partner (by slug) the picker chose, so a same-named agency
+    // under two partners resolves to the intended one (#66) rather than an
+    // arbitrary name match. Partner users are RLS-scoped to their own partner
+    // anyway; the extra filter is harmless for them.
+    let partnerId: string | null = null;
+    if (b.partner) {
+      const { data: p } = await userClient.from("partners").select("id").eq("slug", b.partner).maybeSingle();
+      partnerId = p?.id ?? null;
+    }
+    let branchQuery = userClient
+      .from("branches").select("id, partner_id, agencies!inner(name)").eq("name", b.branch).eq("agencies.name", b.agency);
+    if (partnerId) branchQuery = branchQuery.eq("partner_id", partnerId);
+    const { data: branch, error: brErr } = await branchQuery.limit(1).maybeSingle();
     if (brErr) return json({ ok: false, error: brErr.message }, 400);
 
     // Resolve the target branch; if it does not exist yet, create the agency/branch

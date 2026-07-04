@@ -10,7 +10,7 @@
    this page routes on to the dashboard.
    ===================================================================== */
 import { useEffect, useRef, useState, type ClipboardEvent, type FormEvent, type KeyboardEvent } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { authService } from '@/data';
 import { SUPABASE_ENABLED } from '@/lib/supabase';
 import { useSession } from '@/session/SessionContext';
@@ -201,7 +201,8 @@ export function Login() {
                   <input id="pass" type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} required />
                 </div>
                 <div className="auth__row auth__row--end">
-                  <a href="/forgot-password">Forgot password?</a>
+                  {/* Carry the typed email over so the reset form is prefilled (#60). */}
+                  <Link to={`/forgot-password${email.trim() ? `?email=${encodeURIComponent(email.trim())}` : ''}`}>Forgot password?</Link>
                 </div>
                 <Button variant="primary" block type="submit" arrow disabled={busy}>{busy ? 'Signing in…' : 'Continue'}</Button>
               </form>

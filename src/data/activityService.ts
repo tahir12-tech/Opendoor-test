@@ -14,6 +14,7 @@ import type { ActivityEntry, ActivityKind, ExpiryBand, PartnerScope, Role, Upcom
 import { ALL_PARTNERS } from './types';
 import { UPCOMING_GUARANTEES, type UpcomingGuaranteeSeed } from './mock/guarantees';
 import { allSummaries, guaranteeExpiry } from './applicationsService';
+import { KEYS, loadJSON, saveJSON } from './storage';
 import { SUPABASE_ENABLED, sb } from '@/lib/supabase';
 
 const DAY = 86400000;
@@ -126,14 +127,39 @@ export interface NotificationItem {
   dot: 'sent' | 'paid' | 'deed' | 'other';
   /** Pre-formatted honest relative time (live), or the demo string (mock). */
   time: string;
+  /** Machine timestamp (ISO) of the event, for per-user read-state comparison. */
+  at: string;
 }
 
-// Mock/test mode keeps the illustrative demo entries.
+// Mock/test mode keeps the illustrative demo entries. Fixed, descending
+// timestamps so the read-state comparison is deterministic in mock mode.
 const DEMO_NOTIFICATIONS: NotificationItem[] = [
-  { ref: 'GR-20455', text: 'Chen Wei reached Paid', dot: 'paid', time: '14 minutes ago' },
-  { ref: 'GR-20418', text: 'Deed issued for Amelia Hartley', dot: 'deed', time: '1 hour ago' },
-  { ref: 'GR-20518', text: 'New referral sent to Omar Farouk', dot: 'sent', time: '3 hours ago' },
+  { ref: 'GR-20455', text: 'Chen Wei reached Paid', dot: 'paid', time: '14 minutes ago', at: '2026-06-26T11:46:00.000Z' },
+  { ref: 'GR-20418', text: 'Deed issued for Amelia Hartley', dot: 'deed', time: '1 hour ago', at: '2026-06-26T11:00:00.000Z' },
+  { ref: 'GR-20518', text: 'New referral sent to Omar Farouk', dot: 'sent', time: '3 hours ago', at: '2026-06-26T09:00:00.000Z' },
 ];
+
+/* ---- per-user notifications read state (persisted, item #64) ---- */
+
+function notifReadMap(): Record<string, string> {
+  return loadJSON<Record<string, string>>(KEYS.notifRead, {});
+}
+/** The newest event timestamp across the given notifications ('' if none). */
+function newestAt(items: NotificationItem[]): string {
+  return items.reduce((m, i) => (i.at > m ? i.at : m), '');
+}
+/** True when the caller has notifications newer than they last marked read. */
+export function notificationsUnread(userKey: string, items: NotificationItem[]): boolean {
+  if (!items.length) return false;
+  return newestAt(items) > (notifReadMap()[userKey] ?? '');
+}
+/** Persist that the caller has read everything up to the newest current item. */
+export function markNotificationsRead(userKey: string, items: NotificationItem[]): void {
+  if (!items.length) return;
+  const map = notifReadMap();
+  map[userKey] = newestAt(items);
+  saveJSON(KEYS.notifRead, map);
+}
 
 const NOTIF_KINDS = ['referral_created', 'payment_received', 'deed_sent', 'deed_signed', 'deed_issued', 'refunded', 'expiry_reminder'];
 
@@ -194,7 +220,7 @@ export async function getNotifications(): Promise<NotificationItem[]> {
     prevKey = key;
     const tenant = `${app.tenant_first_name ?? ''} ${app.tenant_last_name ?? ''}`.trim() || app.guarantee_ref;
     const { text, dot } = notifLabel(row.kind, tenant);
-    out.push({ ref: app.guarantee_ref, text, dot, time: relTime(new Date(row.at)) });
+    out.push({ ref: app.guarantee_ref, text, dot, time: relTime(new Date(row.at)), at: String(row.at) });
     if (out.length >= 8) break;
   }
   return out;

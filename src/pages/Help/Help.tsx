@@ -7,7 +7,8 @@
    INTEGRATION: helpService.getHelpContent + the mutators back these; real
    file upload replaces the client-side data-URL storage.
    ===================================================================== */
-import { useEffect, useRef, useState, type DragEvent } from 'react';
+import { useEffect, useRef, useState, type DragEvent, type ReactNode } from 'react';
+import { useLocation } from 'react-router-dom';
 import { helpService, type HelpResource, type HelpResourceSection } from '@/data';
 import { useSession } from '@/session/SessionContext';
 import { usePageMeta } from '@/components/layout/pageMeta';
@@ -71,6 +72,7 @@ type PendingFile = HelpResource['file'] | null | false;
 
 export function Help() {
   usePageMeta('help', 'Help & resources', ['Home', 'Help & resources']);
+  const { hash } = useLocation();
   const { role } = useSession();
   const isAdmin = role === 'superadmin';
   const toast = useToast();
@@ -93,6 +95,21 @@ export function Help() {
   const [faqDraft, setFaqDraft] = useState<{ id: string | null; q: string; a: string } | null>(null);
   // manager modal
   const [mgrDraft, setMgrDraft] = useState<{ id: string | null; name: string; role: string; email: string; phone: string } | null>(null);
+  // consequence-aware delete confirmation (portal-wide destructive-action pattern)
+  const [confirm, setConfirm] = useState<{ title: string; body: ReactNode; run: () => void } | null>(null);
+  function runConfirm() { if (!confirm) return; confirm.run(); setConfirm(null); }
+
+  // Scroll to the anchored section when arriving via a hash link (e.g. the
+  // topbar Help menu's /help#faqs). React Router does not hash-scroll, and the
+  // scroll container is .content (not window), so scroll the target into view.
+  useEffect(() => {
+    if (!hash) return;
+    const id = hash.slice(1);
+    const raf = requestAnimationFrame(() => {
+      document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
+    return () => cancelAnimationFrame(raf);
+  }, [hash]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -242,7 +259,7 @@ export function Help() {
         {isAdmin && (
           <div className="res__admin">
             <button className="mini" title="Edit" onClick={(e) => { e.preventDefault(); e.stopPropagation(); openResource(section, r.id); }}><Icon name="edit" /></button>
-            <button className="mini mini--danger" title="Delete" onClick={(e) => { e.preventDefault(); e.stopPropagation(); helpService.deleteResource(section, r.id); refresh(); toast('Resource deleted for all users.'); }}><Icon name="trash" /></button>
+            <button className="mini mini--danger" title="Delete" onClick={(e) => { e.preventDefault(); e.stopPropagation(); setConfirm({ title: 'Delete resource?', body: <>Delete <b>{r.title || 'this resource'}</b>? It is removed for all users and cannot be undone.</>, run: () => { helpService.deleteResource(section, r.id); refresh(); toast('Resource deleted for all users.'); } }); }}><Icon name="trash" /></button>
           </div>
         )}
         {hasFile && <span className="res__dl" title={r.href ? 'Open' : 'Download'}><Icon name={r.href ? 'external' : 'download'} /></span>}
@@ -333,7 +350,7 @@ export function Help() {
                       {isAdmin && (
                         <span className="faq__admin">
                           <button className="mini" title="Edit" onClick={(e) => { e.preventDefault(); setFaqDraft({ id: f.id, q: f.q, a: f.a }); }}><Icon name="edit" /></button>
-                          <button className="mini mini--danger" title="Delete" onClick={(e) => { e.preventDefault(); helpService.deleteFaq(f.id); refresh(); toast('FAQ deleted for all users.'); }}><Icon name="trash" /></button>
+                          <button className="mini mini--danger" title="Delete" onClick={(e) => { e.preventDefault(); setConfirm({ title: 'Delete FAQ?', body: <>Delete the FAQ <b>&ldquo;{f.q}&rdquo;</b>? It is removed for all users and cannot be undone.</>, run: () => { helpService.deleteFaq(f.id); refresh(); toast('FAQ deleted for all users.'); } }); }}><Icon name="trash" /></button>
                         </span>
                       )}
                       <Icon name="chevronRight" className="faq__chev" size={18} strokeWidth={2.2} />
@@ -382,7 +399,7 @@ export function Help() {
                       {isAdmin && (
                         <div className="am-row__act">
                           <button className="mini" title="Edit" onClick={() => setMgrDraft({ id: m.id, name: m.name, role: m.role, email: m.email, phone: m.phone })}><Icon name="edit" /></button>
-                          <button className="mini mini--danger" title="Delete" onClick={() => { helpService.deleteManager(m.id); refresh(); toast('Account manager removed.'); }}><Icon name="trash" /></button>
+                          <button className="mini mini--danger" title="Delete" onClick={() => setConfirm({ title: 'Remove account manager?', body: <>Remove <b>{m.name.trim() || 'this account manager'}</b>? They will no longer appear on the Help page. This cannot be undone.</>, run: () => { helpService.deleteManager(m.id); refresh(); toast('Account manager removed.'); } })}><Icon name="trash" /></button>
                         </div>
                       )}
                     </div>
@@ -402,7 +419,7 @@ export function Help() {
         sub="Visible to everyone in the portal."
         footer={
           <>
-            {resDraft?.id && <Button variant="quiet" onClick={deleteResource} style={{ color: 'var(--danger)' }}>Delete</Button>}
+            {resDraft?.id && <Button variant="quiet" onClick={() => setConfirm({ title: 'Delete resource?', body: <>Delete <b>{resDraft?.title || 'this resource'}</b>? It is removed for all users and cannot be undone.</>, run: deleteResource })} style={{ color: 'var(--danger)' }}>Delete</Button>}
             <div style={{ marginLeft: 'auto', display: 'flex', gap: 10 }}>
               <Button variant="ghost" onClick={() => setResDraft(null)}>Cancel</Button>
               <Button variant="primary" onClick={saveResource}>Save</Button>
@@ -453,7 +470,7 @@ export function Help() {
         sub="Visible to everyone in the portal."
         footer={
           <>
-            {faqDraft?.id && <Button variant="quiet" onClick={() => { helpService.deleteFaq(faqDraft.id!); setFaqDraft(null); refresh(); toast('FAQ deleted for all users.'); }} style={{ color: 'var(--danger)' }}>Delete</Button>}
+            {faqDraft?.id && <Button variant="quiet" onClick={() => setConfirm({ title: 'Delete FAQ?', body: <>Delete this FAQ? It is removed for all users and cannot be undone.</>, run: () => { helpService.deleteFaq(faqDraft.id!); setFaqDraft(null); refresh(); toast('FAQ deleted for all users.'); } })} style={{ color: 'var(--danger)' }}>Delete</Button>}
             <div style={{ marginLeft: 'auto', display: 'flex', gap: 10 }}>
               <Button variant="ghost" onClick={() => setFaqDraft(null)}>Cancel</Button>
               <Button variant="primary" onClick={saveFaq}>Save</Button>
@@ -477,7 +494,7 @@ export function Help() {
         sub="Shown to the partner team on this page."
         footer={
           <>
-            {mgrDraft?.id && <Button variant="quiet" onClick={() => { helpService.deleteManager(mgrDraft.id!); setMgrDraft(null); refresh(); toast('Account manager removed.'); }} style={{ color: 'var(--danger)' }}>Delete</Button>}
+            {mgrDraft?.id && <Button variant="quiet" onClick={() => setConfirm({ title: 'Remove account manager?', body: <>Remove <b>{mgrDraft?.name.trim() || 'this account manager'}</b>? They will no longer appear on the Help page. This cannot be undone.</>, run: () => { helpService.deleteManager(mgrDraft.id!); setMgrDraft(null); refresh(); toast('Account manager removed.'); } })} style={{ color: 'var(--danger)' }}>Delete</Button>}
             <div style={{ marginLeft: 'auto', display: 'flex', gap: 10 }}>
               <Button variant="ghost" onClick={() => setMgrDraft(null)}>Cancel</Button>
               <Button variant="primary" onClick={saveManager}>Save</Button>
@@ -493,6 +510,17 @@ export function Help() {
             <Field label="Phone" htmlFor="am-phone"><input id="am-phone" type="text" placeholder="020 4577 2100" value={mgrDraft.phone} onChange={(e) => setMgrDraft({ ...mgrDraft, phone: e.target.value })} /></Field>
           </div>
         )}
+      </Modal>
+
+      {/* DELETE CONFIRMATION (consequence-aware, all Help deletes route here) */}
+      <Modal
+        open={!!confirm}
+        onClose={() => setConfirm(null)}
+        width={440}
+        title={confirm?.title ?? ''}
+        footer={<><Button variant="ghost" onClick={() => setConfirm(null)}>Cancel</Button><Button variant="primary" className="btn--danger" onClick={runConfirm}>Delete</Button></>}
+      >
+        <p style={{ fontSize: 13.5, color: 'var(--ink-soft)', lineHeight: 1.55 }}>{confirm?.body}</p>
       </Modal>
 
       {/* IN-PAGE VIEWER */}

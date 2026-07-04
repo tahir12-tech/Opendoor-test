@@ -212,6 +212,21 @@ export function createBranchOnTheFly(agencyName: string, name: string): Branch |
    ===================================================================== */
 const orgLive = (): boolean => SUPABASE_ENABLED && isHydrated();
 
+/**
+ * Never surface a raw Postgres internal error to the UI (#67). Our RPCs raise
+ * friendly, sentence-cased messages; anything that reads like a database
+ * internal (mentions tuple/constraint/relation/permission, or a raw errcode) is
+ * replaced with a generic, safe message.
+ */
+function cleanRpcError(msg?: string): string {
+  const m = (msg || '').trim();
+  if (!m) return 'Something went wrong. Please try again.';
+  if (/tuple|constraint|violates|duplicate key|relation "|column "|operator |syntax error|permission denied for|out of range|deadlock|current command/i.test(m)) {
+    return 'Something went wrong saving that change. Please try again.';
+  }
+  return m;
+}
+
 export interface CreateAgencyInput {
   name: string;
   group?: string;
@@ -232,7 +247,7 @@ export async function createAgencyLive(input: CreateAgencyInput, scope: PartnerS
       p_contact_name: input.contactName ?? null,
       p_contact_phone: input.contactPhone ?? null,
     });
-    if (error) throw new Error(error.message);
+    if (error) throw new Error(cleanRpcError(error.message));
     return;
   }
   const ag = addAgency({ name: input.name, group: input.group }, scope);
@@ -263,7 +278,7 @@ export async function createBranchLive(agency: Agency, input: CreateBranchInput)
       p_contact_name: input.contactName ?? null,
       p_contact_phone: input.contactPhone ?? null,
     });
-    if (error) throw new Error(error.message);
+    if (error) throw new Error(cleanRpcError(error.message));
     return;
   }
   const br = addBranch(agency.name, { name: input.name, area: input.area });
@@ -285,7 +300,7 @@ export async function addContactLive(agency: Agency, branch: Branch | null, rec:
       p_branch_id: branch ? branch.id : null,
       p_name: rec.name, p_role: rec.role || null, p_email: rec.email, p_phone: rec.phone || null, p_primary: rec.primary,
     });
-    if (error) throw new Error(error.message);
+    if (error) throw new Error(cleanRpcError(error.message));
     return;
   }
   addContact(agency.name, branch?.name ?? null, rec);
@@ -298,7 +313,7 @@ export async function updateContactLive(agency: Agency, branch: Branch | null, i
     const { error } = await sb().rpc('org_update_contact', {
       p_id: contactId, p_name: rec.name, p_role: rec.role || null, p_email: rec.email, p_phone: rec.phone || null, p_primary: rec.primary,
     });
-    if (error) throw new Error(error.message);
+    if (error) throw new Error(cleanRpcError(error.message));
     return;
   }
   updateContact(agency.name, branch?.name ?? null, index, rec);
@@ -309,7 +324,7 @@ export async function removeContactLive(agency: Agency, branch: Branch | null, i
   if (orgLive()) {
     if (!contactId) throw new Error('This contact is not yet saved. Refresh and try again.');
     const { error } = await sb().rpc('org_remove_contact', { p_id: contactId });
-    if (error) throw new Error(error.message);
+    if (error) throw new Error(cleanRpcError(error.message));
     return;
   }
   removeContact(agency.name, branch?.name ?? null, index);
@@ -320,7 +335,7 @@ export async function setPrimaryLive(agency: Agency, branch: Branch | null, inde
   if (orgLive()) {
     if (!contactId) throw new Error('This contact is not yet saved. Refresh and try again.');
     const { error } = await sb().rpc('org_set_primary_contact', { p_id: contactId });
-    if (error) throw new Error(error.message);
+    if (error) throw new Error(cleanRpcError(error.message));
     return;
   }
   setPrimaryContact(agency.name, branch?.name ?? null, index);

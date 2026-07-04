@@ -3,10 +3,16 @@
    partners, users and help. Closes on scrim click and Escape. Rendered in
    a portal so it stacks above the app shell.
    ===================================================================== */
-import { useEffect, useId, type ReactNode } from 'react';
+import { useEffect, useId, useRef, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { Icon } from './Icon';
 import './Modal.css';
+
+// Shared stack of open modals so Escape only dismisses the TOP-most one. Without
+// this, two mounted modals (e.g. a delete confirmation stacked over an edit
+// modal) each register a document-level Escape listener and one keypress closes
+// both, discarding the underlying form.
+const modalStack: string[] = [];
 
 export function Modal({
   open,
@@ -28,15 +34,24 @@ export function Modal({
   bodyStyle?: React.CSSProperties;
 }) {
   const titleId = useId();
+  // Latest onClose without re-running the stack effect on every render.
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
 
   useEffect(() => {
     if (!open) return;
+    modalStack.push(titleId);
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
+      // Only the top-most modal responds to Escape.
+      if (e.key === 'Escape' && modalStack[modalStack.length - 1] === titleId) onCloseRef.current();
     };
     document.addEventListener('keydown', onKey);
-    return () => document.removeEventListener('keydown', onKey);
-  }, [open, onClose]);
+    return () => {
+      document.removeEventListener('keydown', onKey);
+      const i = modalStack.lastIndexOf(titleId);
+      if (i >= 0) modalStack.splice(i, 1);
+    };
+  }, [open, titleId]);
 
   if (!open) return null;
 

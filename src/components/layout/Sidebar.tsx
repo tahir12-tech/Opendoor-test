@@ -3,11 +3,12 @@
    signed-in user footer. Ported from portal.js buildSidebar. The
    reconciliation badge count comes from the queue.
    ===================================================================== */
+import { useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { reconciliationPendingCount } from '@/data';
 import { useSession } from '@/session/SessionContext';
-import { SUPABASE_ENABLED } from '@/lib/supabase';
 import { NAV } from '@/constants/nav';
+import { useOnClickOutside } from '@/hooks/useOnClickOutside';
 import { usePageMetaValue } from './pageMeta';
 import { Icon } from '@/components/ui/Icon';
 
@@ -18,6 +19,9 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
   const navigate = useNavigate();
   const { active } = usePageMetaValue();
   const reconcileBadge = reconciliationPendingCount();
+  const [menuOpen, setMenuOpen] = useState(false);
+  const footRef = useRef<HTMLDivElement>(null);
+  useOnClickOutside(footRef, () => setMenuOpen(false), menuOpen);
 
   return (
     <>
@@ -54,26 +58,37 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
         })}
       </nav>
 
-      <div className="sb__foot">
-        <div className="sb__user">
+      <div className="sb__foot" ref={footRef}>
+        {menuOpen && (
+          <div className="sb__usermenu" role="menu">
+            <div className="sb__usermenu-head">
+              <div className="sb__user-name">{user.name}</div>
+              <div className="sb__user-role">{user.label}</div>
+            </div>
+            <button
+              type="button"
+              className="sb__usermenu-item sb__usermenu-item--danger"
+              role="menuitem"
+              onClick={async () => { setMenuOpen(false); await signOut(); navigate('/login'); }}
+            >
+              <Icon name="arrowLeft" /> Sign out
+            </button>
+          </div>
+        )}
+        <button
+          type="button"
+          className={`sb__user${menuOpen ? ' is-open' : ''}`}
+          aria-haspopup="menu"
+          aria-expanded={menuOpen}
+          onClick={() => setMenuOpen((o) => !o)}
+        >
           <span className="sb__avatar">{user.initials}</span>
-          <div>
+          <div className="sb__user-txt">
             <div className="sb__user-name">{user.name}</div>
             <div className="sb__user-role">{user.label}</div>
           </div>
-          {SUPABASE_ENABLED && (
-            <button
-              type="button"
-              className="iconbtn"
-              aria-label="Sign out"
-              title="Sign out"
-              style={{ marginLeft: 'auto' }}
-              onClick={async () => { await signOut(); navigate('/login'); }}
-            >
-              <Icon name="arrowLeft" />
-            </button>
-          )}
-        </div>
+          <span className="sb__user-caret"><Icon name="caretUp" /></span>
+        </button>
       </div>
     </>
   );

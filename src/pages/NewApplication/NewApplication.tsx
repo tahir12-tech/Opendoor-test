@@ -36,7 +36,7 @@ const EMPTY: ReferralValues = {
 export function NewApplication() {
   usePageMeta('new', 'New application', ['Home', 'Applications', 'New']);
   const navigate = useNavigate();
-  const { refresh, partnerScope } = useSession();
+  const { refresh, role, partnerScope } = useSession();
   const toast = useToast();
 
   const [values, setValues] = useState<ReferralValues>(EMPTY);
@@ -44,10 +44,12 @@ export function NewApplication() {
   const [submitted, setSubmitted] = useState(false);
   const [formError, setFormError] = useState('');
   const [busy, setBusy] = useState(false);
-  // On-the-fly org creation extras from the AgentBranchPicker (contact capture).
+  // On-the-fly org creation extras from the AgentBranchPicker (contact capture
+  // and, for an admin, the target partner the referral lands under).
   const [org, setOrg] = useState({
     agencyNew: false, branchNew: false,
     agencyContactEmail: '', agencyContactName: '', agencyContactPhone: '', branchContactEmail: '',
+    partner: '',
   });
 
   // address lookup
@@ -62,7 +64,9 @@ export function NewApplication() {
   // A newly-created agency must capture a contact email (its default contact).
   const agencyEmailOk = /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(org.agencyContactEmail);
   const orgContactError = org.agencyNew && !agencyEmailOk;
-  const isValid = Object.keys(errors).length === 0 && !orgContactError;
+  // An admin fly-creating an agency must choose the partner it lands under (#66).
+  const orgPartnerError = org.agencyNew && role === 'superadmin' && !org.partner;
+  const isValid = Object.keys(errors).length === 0 && !orgContactError && !orgPartnerError;
   const set = (k: keyof ReferralValues, v: string) => setValues((prev) => ({ ...prev, [k]: v }));
   const markTouched = (k: string) => setTouched((t) => new Set(t).add(k));
   const err = (k: keyof ReferralValues) => ((submitted || touched.has(k)) ? errors[k] : undefined);
@@ -111,10 +115,11 @@ export function NewApplication() {
         agencyNew: org.agencyNew, branchNew: org.branchNew,
         agencyContactEmail: org.agencyContactEmail, agencyContactName: org.agencyContactName,
         agencyContactPhone: org.agencyContactPhone, branchContactEmail: org.branchContactEmail,
-        // The partner an on-the-fly agency belongs to. Only meaningful for an
-        // admin (a partner user's own partner is authoritative server-side);
-        // "all partners" carries no single partner, so send none.
-        partner: partnerScope === ALL_PARTNERS ? undefined : partnerScope,
+        // The partner the referral belongs to, resolved by the picker (the
+        // chosen agency's own partner, or the admin's selected partner for a
+        // fly-created agency). Server ignores it for partner users, whose own
+        // partner is authoritative. Fall back to a specific ambient scope.
+        partner: org.partner || (partnerScope === ALL_PARTNERS ? undefined : partnerScope),
       });
       await refresh();
       toast(res.emailSent
@@ -254,8 +259,9 @@ export function NewApplication() {
             <CardBody>
               <AgentBranchPicker onChange={(v) => {
                 setValues((prev) => ({ ...prev, agency: v.agency, branch: v.branch }));
-                setOrg({ agencyNew: v.agencyNew, branchNew: v.branchNew, agencyContactEmail: v.agencyContactEmail, agencyContactName: v.agencyContactName, agencyContactPhone: v.agencyContactPhone, branchContactEmail: v.branchContactEmail });
+                setOrg({ agencyNew: v.agencyNew, branchNew: v.branchNew, agencyContactEmail: v.agencyContactEmail, agencyContactName: v.agencyContactName, agencyContactPhone: v.agencyContactPhone, branchContactEmail: v.branchContactEmail, partner: v.partner });
               }} />
+              {submitted && orgPartnerError && <p className="na-form-error" style={{ marginTop: 8 }}>Select the partner this new agency belongs to.</p>}
               {submitted && orgContactError && <p className="na-form-error" style={{ marginTop: 8 }}>Enter a contact email for the new agency.</p>}
               {submitted && (errors.agency || errors.branch) && (
                 <span className="field-error" style={{ marginTop: 10 }}>Select an agent and a branch.</span>

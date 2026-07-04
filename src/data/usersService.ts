@@ -133,12 +133,17 @@ export async function resetUserMfa(id: string): Promise<void> {
   recordUserAudit(id, 'reset_mfa', 'enrolled', 'reset');
 }
 
-/** Send a password-reset link to a user's email (live mode). No-op in mock mode. */
+/** Send a password-reset link to a user's email (live mode). No-op in mock mode.
+    Routes through the send-password-reset Edge Function (branded Resend email,
+    redirected to the review address in this test build) rather than GoTrue's
+    built-in mailer, so it honours the review-redirect convention and lands on
+    the app's /reset-password screen. */
 export async function resetUserPassword(id: string): Promise<void> {
   const u = USERS.find((x) => x.id === id);
   if (!u) throw new Error('User not found.');
   if (SUPABASE_ENABLED) {
-    const { error } = await sb().auth.resetPasswordForEmail(userEmail(u));
+    const origin = typeof window !== 'undefined' ? window.location.origin : '';
+    const { error } = await sb().functions.invoke('send-password-reset', { body: { email: userEmail(u), origin } });
     if (error) throw new Error(error.message);
   }
 }

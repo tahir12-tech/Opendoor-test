@@ -10,6 +10,7 @@ import { RequireRole } from '@/components/guards/RequireRole';
 import { RequireAuth } from '@/components/guards/RequireAuth';
 import { Login } from '@/pages/Login/Login';
 import { ForgotPassword } from '@/pages/ForgotPassword/ForgotPassword';
+import { ResetPassword } from '@/pages/auth/ResetPassword';
 import { PaymentConfirmed } from '@/pages/Pay/PaymentConfirmed';
 import { PaymentRetry } from '@/pages/Pay/PaymentRetry';
 import { Dashboard } from '@/pages/Dashboard/Dashboard';
@@ -31,6 +32,8 @@ export function App() {
       <Route path="/" element={<Navigate to="/login" replace />} />
       <Route path="/login" element={<Login />} />
       <Route path="/forgot-password" element={<ForgotPassword />} />
+      {/* Public: the recovery link lands here to set a new password. */}
+      <Route path="/reset-password" element={<ResetPassword />} />
 
       {/* Public, unauthenticated tenant payment pages (post-Stripe redirect). */}
       <Route path="/pay/confirmed" element={<PaymentConfirmed />} />
