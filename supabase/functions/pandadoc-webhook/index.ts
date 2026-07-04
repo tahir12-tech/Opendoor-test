@@ -12,6 +12,7 @@
 // =====================================================================
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { verifyWebhook, downloadPdf } from "../_shared/pandadoc.ts";
+import { deliverDeedToAgent } from "../_shared/deedEmail.ts";
 
 Deno.serve(async (req) => {
   const signature = new URL(req.url).searchParams.get("signature") ?? "";
@@ -39,7 +40,9 @@ Deno.serve(async (req) => {
     const { error: insErr } = await service.from("pandadoc_events").insert({ id: evId, type });
     if (insErr) continue; // duplicate delivery -> skip
 
-    const { data: app } = await service.from("applications").select("id, guarantee_ref").eq("pandadoc_document_id", docId).maybeSingle();
+    const { data: app } = await service.from("applications")
+      .select("id, guarantee_ref, branch_id, tenant_first_name, tenant_last_name, prop_addr1, prop_postcode")
+      .eq("pandadoc_document_id", docId).maybeSingle();
 
     if (status === "document.completed") {
       let path: string | null = null;
@@ -54,6 +57,26 @@ Deno.serve(async (req) => {
         // driven by apply_deed_executed above; this is the distinct signed entry.
         await service.from("activity_log").insert({ application_id: app.id, kind: "deed_signed", message: "Deed signed by the tenant.", actor: "PandaDoc", visibility: "business" });
         await service.from("pandadoc_events").update({ application_id: app.id }).eq("id", evId);
+
+        // Automatic deed delivery to the resolved claim contact (branch contact ->
+        // agency default). Runs exactly once per document: the pandadoc_events
+        // insert above dedups a webhook retry, so it cannot double-send. This is
+        // the same email the manual "Send deed to agent" button sends; if no
+        // contact resolves we record it for the needs-attention surface, never
+        // failing silently. The manual button is the recovery/resend path.
+        const { data: contact } = await service.rpc("effective_primary_contact", { p_branch: app.branch_id });
+        const eff = Array.isArray(contact) ? contact[0] : contact;
+        if (eff?.email) {
+          await deliverDeedToAgent(service, {
+            appId: app.id,
+            ref: app.guarantee_ref,
+            tenantName: `${app.tenant_first_name} ${app.tenant_last_name}`,
+            propertyAddr: [app.prop_addr1, app.prop_postcode].filter(Boolean).join(", "),
+            pdfPath: path,
+          }, { email: eff.email, name: eff.name ?? "" }, "automatic");
+        } else {
+          await service.from("activity_log").insert({ application_id: app.id, kind: "deed_undelivered", message: "Deed issued, no agent contact on file, not sent.", actor: "System", visibility: "business" });
+        }
       }
     } else if (status === "document.viewed") {
       if (app) {

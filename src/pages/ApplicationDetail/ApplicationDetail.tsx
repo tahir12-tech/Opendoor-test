@@ -69,6 +69,8 @@ const BUSINESS_LABEL: Record<string, string> = {
   // clean copy, never the raw provider error (which stays opndoor-admin-only).
   payment_email_failed: 'Payment email could not be sent; opndoor has been notified',
   deed_sent: 'Deed of Guarantee sent to the tenant for signature',
+  deed_delivered: 'Deed of Guarantee delivered to the agent',
+  deed_undelivered: 'Deed issued; no agent contact on file, not sent',
   deed_viewed: 'Deed viewed by the tenant',
   deed_signed: 'Deed signed by the tenant',
   deed_reminded: 'Signature reminder sent to the tenant',

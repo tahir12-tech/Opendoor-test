@@ -232,6 +232,7 @@
 .na-stat--sign { border-left-color: var(--paid); }
 .na-stat--sent { border-left-color: var(--sent); }
 .na-stat--pay { border-left-color: var(--heliotrope-deep); }
+.na-stat--warn { border-left-color: var(--danger, #c0392b); }
 .na-stat__n { font-family: var(--display); font-weight: 800; font-size: 24px; letter-spacing: -0.02em; line-height: 1; color: var(--ink); }
 .na-stat__l { font-size: 13px; color: var(--ink-mute); line-height: 1.35; }
 .na-stat__l b { color: var(--ink); font-weight: 700; }

@@ -18,7 +18,7 @@ import {
   convFor, scaleRows, type PeriodDef, type ShapeRow,
 } from './mock/analyticsModel';
 import { getRatesFor, weightFor } from './partnersService';
-import { liveAvailable, liveAggregate, liveVolume, liveTrend, type LiveAgg, type TrendRow } from './liveAnalytics';
+import { liveAvailable, liveAggregate, liveVolume, liveTrend, deedsWithoutContact, type LiveAgg, type TrendRow } from './liveAnalytics';
 export type { TrendRow } from './liveAnalytics';
 export { getCommissionSettlement, getAgentCommissionSettlement, livePartnerBreakdown } from './liveAnalytics';
 export type { CommissionSettlement, PartnerSettlement, SettlementApp, AgentCommissionSettlement, AgentSettlementAgency, PartnerCommissionRow } from './liveAnalytics';
@@ -94,6 +94,8 @@ export interface DashboardModel {
   /** Deeds currently awaiting tenant signature, and how many aged past 7 days. */
   awaiting: number;
   awaitingAged: number;
+  /** Deeds issued with no resolvable claim contact (undeliverable to the agent). */
+  deedsNoContact: number;
 }
 
 /** Convert a synthetic ShapeRow ([name, refs, fees, sub?]) to a LeagueRow. */
@@ -180,6 +182,7 @@ function liveDashboard(role: Role, period: Period, scope: PartnerScope): Dashboa
     commExclDetail: `Partner ${fmtMoney(a.partnerCommExcl)} · Agent ${fmtMoney(a.agentCommExcl)}`,
     awaiting: a.awaiting,
     awaitingAged: a.awaitingAged,
+    deedsNoContact: deedsWithoutContact(role, scope),
   };
 }
 
@@ -240,6 +243,7 @@ function synthDashboard(role: Role, period: PeriodDef | Period, scope: PartnerSc
     commExclDetail: '',
     awaiting: 0,
     awaitingAged: 0,
+    deedsNoContact: 0,
   };
 }
 

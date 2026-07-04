@@ -104,7 +104,8 @@ export function Dashboard() {
   const naAwaiting = d.live && d.awaiting > 0;
   const naStuckSent = d.stuckSent !== '0';
   const naSettlements = d.live && canSeeSettlements && (partnerDue > 0 || agentDue > 0);
-  const hasNeedsAttention = naAwaiting || naStuckSent || naSettlements;
+  const naNoContact = d.live && d.deedsNoContact > 0;
+  const hasNeedsAttention = naAwaiting || naStuckSent || naSettlements || naNoContact;
 
   // #25: the agent settlement can span many agencies, so show the top 5 inline and
   // collapse the rest behind a "View all" expander. The Performance export always
@@ -271,6 +272,13 @@ export function Dashboard() {
               <Link className="na-stat na-stat--sent" to="/applications?status=sent" title="Applications sent but not yet paid">
                 <span className="na-stat__n">{d.stuckSent}</span>
                 <span className="na-stat__l">stuck at Sent · awaiting payment</span>
+                <Icon name="arrowRight" className="na-stat__go" />
+              </Link>
+            )}
+            {naNoContact && (
+              <Link className="na-stat na-stat--warn" to="/agencies" title="Deeds issued with no agent contact on file; add a claim contact, then resend the deed">
+                <span className="na-stat__n">{d.deedsNoContact}</span>
+                <span className="na-stat__l">deed{d.deedsNoContact === 1 ? '' : 's'} issued · no agent contact on file</span>
                 <Icon name="arrowRight" className="na-stat__go" />
               </Link>
             )}

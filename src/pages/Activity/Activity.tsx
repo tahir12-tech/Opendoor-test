@@ -48,6 +48,8 @@ function feedText(kind: string, tenant: string) {
     case 'deed_viewed': return <>Deed viewed by {t}</>;
     case 'deed_signed': return <>Deed signed by {t}</>;
     case 'deed_issued': return <>Deed of Guarantee issued for {t}</>;
+    case 'deed_delivered': return <>Deed of Guarantee delivered to the agent for {t}</>;
+    case 'deed_undelivered': return <>Deed issued for {t}, no agent contact on file</>;
     case 'deed_regenerated': return <>Deed regenerated for {t}</>;
     case 'deed_reissued': return <>Deed reissued for {t}</>;
     case 'tenancy_amended': return <>Tenancy start amended for {t}</>;
@@ -56,8 +58,8 @@ function feedText(kind: string, tenant: string) {
 }
 function feedDot(kind: string): string {
   if (kind === 'payment_received') return 'var(--paid)';
-  if (kind === 'refunded') return 'var(--danger, #d64545)';
-  if (kind === 'deed_signed' || kind === 'deed_issued' || kind === 'deed_reissued' || kind === 'deed_regenerated') return 'var(--deed)';
+  if (kind === 'refunded' || kind === 'deed_undelivered') return 'var(--danger, #d64545)';
+  if (kind === 'deed_signed' || kind === 'deed_issued' || kind === 'deed_reissued' || kind === 'deed_regenerated' || kind === 'deed_delivered') return 'var(--deed)';
   return 'var(--sent)'; // referral_created, deed_sent, deed_viewed, tenancy_amended
 }
 interface FeedRow { id: string; ref: string; dot: string; text: ReactNode; meta: string; }

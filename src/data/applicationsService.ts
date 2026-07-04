@@ -426,14 +426,6 @@ export async function createReferral(input: CreateReferralInput): Promise<Create
   return { ref: data.ref, paymentUrl: data.paymentUrl ?? null, emailSent: !!data.emailSent, emailError: data.emailError ?? null };
 }
 
-/** Resolve an application's DB id from its guarantee reference (Supabase mode). */
-async function appIdByRef(ref: string): Promise<string> {
-  const { data, error } = await sb().from('applications').select('id').eq('guarantee_ref', ref).maybeSingle();
-  if (error) throw new Error(error.message);
-  if (!data) throw new Error('Application not found.');
-  return (data as { id: string }).id;
-}
-
 /**
  * Persist a tenancy-start amendment via the amend-tenancy-start Edge Function.
  * The function calls the amend_tenancy_start RPC (deed-state-aware permission,
@@ -451,18 +443,26 @@ export async function amendTenancyStartDb(ref: string, newStart: Date): Promise<
 }
 
 /**
- * Send the issued deed to an agent via the send_deed_to_agent RPC, which
- * re-checks canSendDeed and (for Referrers) restricts to the resolved contact.
- * No-op in mock mode.
+ * Send the issued deed to the agent via the send-deed-to-agent Edge Function,
+ * which enforces canSendDeed / the referrer restriction (send_deed_to_agent RPC)
+ * and then delivers the same branded deed email the automatic path sends on
+ * execution. This is the manual / recovery-resend path. No-op in mock mode.
  */
-export async function sendDeedToAgent(ref: string, recipientEmail?: string, saveContact?: boolean): Promise<void> {
-  if (!SUPABASE_ENABLED) return;
-  const { error } = await sb().rpc('send_deed_to_agent', {
-    p_app: await appIdByRef(ref),
-    p_recipient_email: recipientEmail ?? null,
-    p_save_contact: saveContact ?? false,
+export async function sendDeedToAgent(ref: string, recipientEmail?: string, saveContact?: boolean): Promise<{ sentTo?: string }> {
+  if (!SUPABASE_ENABLED) return {};
+  const { data, error } = await sb().functions.invoke('send-deed-to-agent', {
+    body: { ref, recipientEmail: recipientEmail ?? null, saveContact: saveContact ?? false },
   });
-  if (error) throw new Error(error.message);
+  if (error) {
+    let msg = error.message as string;
+    try {
+      const ctx = await (error as { context?: { json?: () => Promise<{ error?: string }> } }).context?.json?.();
+      if (ctx?.error) msg = ctx.error;
+    } catch { /* ignore */ }
+    throw new Error(msg || 'Could not send the deed to the agent.');
+  }
+  if (!data?.ok) throw new Error(data?.error || 'Could not send the deed to the agent.');
+  return { sentTo: data.sentTo as string | undefined };
 }
 
 /**
