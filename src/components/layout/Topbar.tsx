@@ -6,6 +6,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { usePageMetaValue } from './pageMeta';
 import { RoleSwitch } from './RoleSwitch';
+import { GlobalSearch } from './GlobalSearch';
 import { HelpMenu, NotificationsMenu, type Pop } from './TopbarMenus';
 import { Icon } from '@/components/ui/Icon';
 import { useOnClickOutside } from '@/hooks/useOnClickOutside';
@@ -49,10 +50,7 @@ export function Topbar({ onMenu }: { onMenu: () => void }) {
         <div className="topbar__title">{title}</div>
       </div>
 
-      <div className="topbar__search">
-        <Icon name="search" />
-        <input type="text" placeholder="Search tenants, references, branches" />
-      </div>
+      <GlobalSearch />
 
       <div className="topbar__actions" ref={actionsRef}>
         <RoleSwitch />

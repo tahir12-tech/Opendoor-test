@@ -2,14 +2,21 @@
    Users — manage partner staff, or the opndoor team (?team=opndoor).
    opndoor admin accounts never appear in a partner list; the opndoor team
    view lists only opndoor staff; Management sees only its own partner.
-   Add user, edit role, and per-row actions (reset password / 2FA, resend
-   invite, deactivate). Reachable by opndoor admin + Management (guard).
+
+   Lifecycle is real (Pending / Active / Deactivated) and every state-changing
+   action (role change, deactivate, reactivate, reset 2FA) runs through an
+   audited, guard-checked service call: a hard role-model wall (partner users
+   are Referrer/Management only; opndoor staff are admin only), self-service
+   lockout guards (no deactivating/demoting yourself or the last active admin),
+   and a confirmation dialog stating the consequence. Reachable by opndoor admin
+   + Management (route guard).
    ===================================================================== */
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import {
-  addUser, deactivateUser, emailOf, getPartner, getPartners, getUsers, homePartner, partnerName,
-  updateUserRole, userPartnerName, type ManagedUser, type Role,
+  addUser, getPartner, getPartners, getUserAudit, getUsers, homePartner, partnerName,
+  resetUserMfa, resetUserPassword, setUserStatus, updateUserRole, userEmail, userPartnerName,
+  type ManagedUser, type Role, type UserAuditEntry,
 } from '@/data';
 import { ALL_PARTNERS } from '@/data';
 import { useSession } from '@/session/SessionContext';
@@ -19,7 +26,7 @@ import { Icon } from '@/components/ui/Icon';
 import { Card, CardHead } from '@/components/ui/Card';
 import { Field } from '@/components/ui/Field';
 import { Modal } from '@/components/ui/Modal';
-import { Pill } from '@/components/ui/Pill';
+import { Pill, type PillVariant } from '@/components/ui/Pill';
 import { useToast } from '@/components/ui/Toast';
 import './UserManagement.css';
 
@@ -28,6 +35,16 @@ const ROLE_META: Record<Role, [string, string]> = {
   management: ['Management', 'role-tag--mgmt'],
   referrer: ['Referrer', 'role-tag--ref'],
 };
+
+const STATUS_PILL: Record<string, [string, PillVariant]> = {
+  active: ['Active', 'deed'],
+  pending: ['Pending', 'warn'],
+  deactivated: ['Deactivated', 'muted'],
+};
+
+const AUDIT_LABEL: Record<string, string> = { status: 'Status', role: 'Role', reset_mfa: '2FA' };
+const dmy = (d: Date) =>
+  `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}/${d.getFullYear()}`;
 
 interface RoleOption {
   id: Role;
@@ -42,24 +59,30 @@ const ROLE_OPTIONS: RoleOption[] = [
 
 const initials = (n: string) => n.split(' ').map((p) => p[0]).slice(0, 2).join('');
 
-function RoleOptions({ options, selected, onSelect, showSuperadmin }: { options: RoleOption[]; selected: Role; onSelect: (r: Role) => void; showSuperadmin: boolean }) {
+interface ConfirmSpec {
+  title: string;
+  body: ReactNode;
+  confirmLabel: string;
+  danger?: boolean;
+  success: string;
+  run: () => Promise<void>;
+}
+
+function RoleOptions({ options, selected, onSelect }: { options: RoleOption[]; selected: Role; onSelect: (r: Role) => void }) {
   return (
     <div className="roleopts">
-      {options.map((o) => {
-        if (o.id === 'superadmin' && !showSuperadmin) return null;
-        return (
-          <label key={o.id} className={`roleopt${selected === o.id ? ' is-sel' : ''}`} onClick={() => onSelect(o.id)}>
-            <span className="roleopt__radio" />
-            <div><div className="roleopt__name">{o.name}</div><div className="roleopt__desc">{o.desc}</div></div>
-          </label>
-        );
-      })}
+      {options.map((o) => (
+        <label key={o.id} className={`roleopt${selected === o.id ? ' is-sel' : ''}`} onClick={() => onSelect(o.id)}>
+          <span className="roleopt__radio" />
+          <div><div className="roleopt__name">{o.name}</div><div className="roleopt__desc">{o.desc}</div></div>
+        </label>
+      ))}
     </div>
   );
 }
 
 export function UserManagement() {
-  const { role, selectedPartner, setSelectedPartner } = useSession();
+  const { role, currentUserId, selectedPartner, setSelectedPartner, refresh: refreshData } = useSession();
   const toast = useToast();
   const [params] = useSearchParams();
   const partnerParam = params.get('partner');
@@ -76,6 +99,10 @@ export function UserManagement() {
   const [, setVersion] = useState(0);
   const refresh = () => setVersion((v) => v + 1);
   const [menuOpenId, setMenuOpenId] = useState<string | null>(null);
+  const [menuUp, setMenuUp] = useState(false);
+  const [query, setQuery] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [confirm, setConfirm] = useState<ConfirmSpec | null>(null);
 
   // add-user modal
   const [addOpen, setAddOpen] = useState(false);
@@ -87,6 +114,7 @@ export function UserManagement() {
   // edit-role modal
   const [editUser, setEditUser] = useState<ManagedUser | null>(null);
   const [editRole, setEditRole] = useState<Role>('referrer');
+  const [editAudit, setEditAudit] = useState<UserAuditEntry[]>([]);
 
   useEffect(() => {
     const close = () => setMenuOpenId(null);
@@ -94,8 +122,25 @@ export function UserManagement() {
     return () => document.removeEventListener('click', close);
   }, []);
 
-  const users = getUsers({ viewer: role, team: teamMode, scope: selectedPartner });
+  const allUsers = getUsers({ viewer: role, team: teamMode, scope: selectedPartner });
   const showPartner = role === 'superadmin' && !teamMode;
+
+  // Search across name, email, role label and partner (item: dead search fix).
+  const q = query.trim().toLowerCase();
+  const users = q
+    ? allUsers.filter((u) =>
+        u.name.toLowerCase().includes(q) ||
+        userEmail(u).toLowerCase().includes(q) ||
+        ROLE_META[u.role][0].toLowerCase().includes(q) ||
+        userPartnerName(u.partner).toLowerCase().includes(q))
+    : allUsers;
+
+  // Self-service + last-admin guards (also enforced server-side in the RPCs).
+  const activeAdmins = allUsers.filter((u) => u.role === 'superadmin' && u.status === 'active').length;
+  const isSelf = (u: ManagedUser) => currentUserId != null && u.id === currentUserId;
+  const isLastActiveAdmin = (u: ManagedUser) => u.role === 'superadmin' && u.status === 'active' && activeAdmins <= 1;
+  const canDeactivate = (u: ManagedUser) => u.status === 'active' && !isSelf(u) && !isLastActiveAdmin(u);
+  const canEditRole = (u: ManagedUser) => !isSelf(u) && !isLastActiveAdmin(u);
 
   // ---- role-aware framing ----
   let eyebrow = 'Administration · opndoor admin';
@@ -114,21 +159,92 @@ export function UserManagement() {
     cardSub = 'Your partner team';
   }
 
-  // ---- actions ----
+  // ---- action runners ----
+  async function runConfirm() {
+    if (!confirm || busy) return;
+    setBusy(true);
+    try {
+      await confirm.run();
+      await refreshData();
+      refresh();
+      toast(confirm.success);
+      setConfirm(null);
+    } catch (e) {
+      toast(e instanceof Error ? e.message : 'Something went wrong.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function doDirect(fn: () => Promise<void>, success: string) {
+    if (busy) return;
+    setBusy(true);
+    try {
+      await fn();
+      await refreshData();
+      refresh();
+      toast(success);
+    } catch (e) {
+      toast(e instanceof Error ? e.message : 'Something went wrong.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function openEditRole(u: ManagedUser) {
+    setEditUser(u);
+    setEditRole(u.role);
+    setEditAudit([]);
+    getUserAudit(u.id).then(setEditAudit).catch(() => setEditAudit([]));
+  }
+
   function handleAction(action: string, u: ManagedUser) {
-    if (action === 'edit-role') {
-      setEditUser(u);
-      setEditRole(u.role);
+    if (action === 'edit-role') { openEditRole(u); return; }
+    if (action === 'reset-password') {
+      void doDirect(() => resetUserPassword(u.id), `Password reset link sent to ${userEmail(u)}.`);
       return;
     }
-    if (action === 'reset-password') toast(`Password reset link sent to ${emailOf(u.name)}`);
-    else if (action === 'reset-2fa') toast(`Two-factor authentication reset for ${u.name}. They will set it up again at next sign in.`);
-    else if (action === 'resend') toast(`Invite resent to ${emailOf(u.name)}`);
-    else if (action === 'deactivate') {
-      deactivateUser(u.id);
-      refresh();
-      toast(`${u.name} has been deactivated and can no longer sign in.`);
+    if (action === 'resend') { toast(`Invite resent to ${userEmail(u)}.`); return; }
+    if (action === 'reset-2fa') {
+      setConfirm({
+        title: `Reset 2FA for ${u.name}?`,
+        body: <>Their current authenticator stops working immediately and they are signed out. They set up a new authenticator at their next sign in.</>,
+        confirmLabel: 'Reset 2FA',
+        success: `Two-factor authentication reset for ${u.name}. They will set it up again at next sign in.`,
+        run: () => resetUserMfa(u.id),
+      });
+      return;
     }
+    if (action === 'deactivate') {
+      setConfirm({
+        title: `Deactivate ${u.name}?`,
+        body: <>They are signed out immediately and blocked from signing in. Reactivating them is the only way to restore access.</>,
+        confirmLabel: 'Deactivate',
+        danger: true,
+        success: `${u.name} has been deactivated and can no longer sign in.`,
+        run: () => setUserStatus(u.id, 'deactivated'),
+      });
+      return;
+    }
+    if (action === 'reactivate') {
+      setConfirm({
+        title: `Reactivate ${u.name}?`,
+        body: <>They will be able to sign in again with their existing password and two-factor authentication.</>,
+        confirmLabel: 'Reactivate',
+        success: `${u.name} has been reactivated and can sign in again.`,
+        run: () => setUserStatus(u.id, 'active'),
+      });
+    }
+  }
+
+  function toggleMenu(id: string, btn: HTMLElement) {
+    setMenuOpenId((cur) => {
+      if (cur === id) return null;
+      // Flip the popover upward when there is not enough room below the button.
+      const rect = btn.getBoundingClientRect();
+      setMenuUp(window.innerHeight - rect.bottom < 260);
+      return id;
+    });
   }
 
   function openAdd() {
@@ -145,16 +261,27 @@ export function UserManagement() {
     setAddOpen(false);
     toast(`${rec.name} invited as ${ROLE_META[addRole][0]}${addRole === 'superadmin' ? '' : ` at ${partnerName(rec.partner)}`}.`);
   }
-  function saveRole() {
-    if (!editUser) return;
-    updateUserRole(editUser.id, editRole);
-    refresh();
-    const name = editUser.name;
+
+  // Save-role opens a confirmation stating the consequence (then runs the update).
+  function requestSaveRole() {
+    if (!editUser || editRole === editUser.role) { setEditUser(null); return; }
+    const u = editUser;
+    const from = ROLE_META[u.role][0];
+    const to = ROLE_META[editRole][0];
     setEditUser(null);
-    toast(`${name}’s role updated to ${ROLE_META[editRole][0]}.`);
+    setConfirm({
+      title: `Change ${u.name}'s role?`,
+      body: <><b>{from}</b> → <b>{to}</b>. Their access changes immediately at their next page load. {editRole === 'management' ? 'They will see the whole estate.' : editRole === 'referrer' ? 'They will see only their own referrals.' : ''}</>,
+      confirmLabel: 'Change role',
+      success: `${u.name}’s role updated to ${to}.`,
+      run: () => updateUserRole(u.id, editRole),
+    });
   }
 
   const addOptions = teamMode ? ROLE_OPTIONS.filter((o) => o.id === 'superadmin') : ROLE_OPTIONS.filter((o) => o.id !== 'superadmin');
+  // Role-model wall: the edit dialog only offers roles on the target's side of it.
+  const editTargetIsTeam = !!editUser && (editUser.partner === 'opndoor' || editUser.role === 'superadmin');
+  const editRoleOptions = editTargetIsTeam ? ROLE_OPTIONS.filter((o) => o.id === 'superadmin') : ROLE_OPTIONS.filter((o) => o.id !== 'superadmin');
 
   return (
     <>
@@ -171,9 +298,14 @@ export function UserManagement() {
 
       {/* role legend */}
       <div className="toolbar" style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 18 }}>
-        {teamMode && <span className="role-tag role-tag--super">opndoor admin · full control</span>}
-        <span className="role-tag role-tag--mgmt">Management · full estate, no opndoor admin</span>
-        <span className="role-tag role-tag--ref">Referrer · own referrals only</span>
+        {teamMode ? (
+          <span className="role-tag role-tag--super">opndoor admin · full control of the portal</span>
+        ) : (
+          <>
+            <span className="role-tag role-tag--mgmt">Management · full estate, no opndoor admin</span>
+            <span className="role-tag role-tag--ref">Referrer · own referrals only</span>
+          </>
+        )}
       </div>
 
       <Card>
@@ -193,7 +325,7 @@ export function UserManagement() {
               )}
               <div className="users-search">
                 <Icon name="search" />
-                <input type="text" placeholder="Search users" />
+                <input type="text" placeholder="Search users" value={query} onChange={(e) => setQuery(e.target.value)} />
               </div>
             </div>
           }
@@ -213,40 +345,46 @@ export function UserManagement() {
             <tbody>
               {users.map((u) => {
                 const rm = ROLE_META[u.role];
-                const isPending = u.status !== 'active';
+                const sp = STATUS_PILL[u.status] ?? STATUS_PILL.pending;
                 return (
                   <tr key={u.id}>
                     <td>
                       <div className="who">
                         <span className="who__av">{initials(u.name)}</span>
-                        <div><div className="dt__name">{u.name}</div><div className="dt__sub">{emailOf(u.name)}</div></div>
+                        <div><div className="dt__name">{u.name}</div><div className="dt__sub">{userEmail(u)}</div></div>
                       </div>
                     </td>
                     {showPartner && <td className="soft">{userPartnerName(u.partner)}</td>}
                     <td><span className={`role-tag ${rm[1]}`}>{rm[0]}</span></td>
                     <td className="soft">{u.lastActive}</td>
-                    <td>{u.status === 'active' ? <Pill variant="deed">Active</Pill> : <Pill variant="warn">Pending</Pill>}</td>
+                    <td><Pill variant={sp[1]}>{sp[0]}</Pill></td>
                     <td style={{ textAlign: 'right' }}>
-                      <div className={`rowmenu${menuOpenId === u.id ? ' is-open' : ''}`}>
+                      <div className={`rowmenu${menuOpenId === u.id ? ' is-open' : ''}${menuOpenId === u.id && menuUp ? ' rowmenu--up' : ''}`}>
                         <button
                           className="rowmenu__btn"
                           aria-label="User actions"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setMenuOpenId((cur) => (cur === u.id ? null : u.id));
-                          }}
+                          onClick={(e) => { e.stopPropagation(); toggleMenu(u.id, e.currentTarget); }}
                         >
                           <Icon name="dots" size={16} />
                         </button>
                         <div className="rowmenu__pop">
-                          <button className="rowmenu__item" onClick={() => { setMenuOpenId(null); handleAction('edit-role', u); }}><Icon name="edit" />Edit role</button>
-                          <button className="rowmenu__item" onClick={() => { setMenuOpenId(null); handleAction('reset-password', u); }}><Icon name="lock" />Reset password</button>
-                          <button className="rowmenu__item" onClick={() => { setMenuOpenId(null); handleAction('reset-2fa', u); }}><Icon name="phone" />Reset 2FA</button>
-                          <div className="rowmenu__sep" />
-                          {isPending ? (
-                            <button className="rowmenu__item" onClick={() => { setMenuOpenId(null); handleAction('resend', u); }}><Icon name="send" />Resend invite</button>
+                          {u.status === 'deactivated' ? (
+                            <button className="rowmenu__item" onClick={() => { setMenuOpenId(null); handleAction('reactivate', u); }}><Icon name="check" />Reactivate user</button>
+                          ) : u.status === 'pending' ? (
+                            <>
+                              <button className="rowmenu__item" onClick={() => { setMenuOpenId(null); handleAction('resend', u); }}><Icon name="send" />Resend invite</button>
+                              {canEditRole(u) && <button className="rowmenu__item" onClick={() => { setMenuOpenId(null); handleAction('edit-role', u); }}><Icon name="edit" />Edit role</button>}
+                            </>
                           ) : (
-                            <button className="rowmenu__item rowmenu__item--danger" onClick={() => { setMenuOpenId(null); handleAction('deactivate', u); }}><Icon name="ban" />Deactivate user</button>
+                            <>
+                              {canEditRole(u) && <button className="rowmenu__item" onClick={() => { setMenuOpenId(null); handleAction('edit-role', u); }}><Icon name="edit" />Edit role</button>}
+                              <button className="rowmenu__item" onClick={() => { setMenuOpenId(null); handleAction('reset-password', u); }}><Icon name="lock" />Reset password</button>
+                              <button className="rowmenu__item" onClick={() => { setMenuOpenId(null); handleAction('reset-2fa', u); }}><Icon name="phone" />Reset 2FA</button>
+                              {canDeactivate(u) && <>
+                                <div className="rowmenu__sep" />
+                                <button className="rowmenu__item rowmenu__item--danger" onClick={() => { setMenuOpenId(null); handleAction('deactivate', u); }}><Icon name="ban" />Deactivate user</button>
+                              </>}
+                            </>
                           )}
                         </div>
                       </div>
@@ -254,6 +392,9 @@ export function UserManagement() {
                   </tr>
                 );
               })}
+              {users.length === 0 && (
+                <tr><td colSpan={showPartner ? 6 : 5} className="soft" style={{ textAlign: 'center', padding: '28px 0' }}>{q ? `No users match “${query.trim()}”.` : 'No users to show yet.'}</td></tr>
+              )}
             </tbody>
           </table>
         </div>
@@ -265,7 +406,7 @@ export function UserManagement() {
         onClose={() => setAddOpen(false)}
         width={560}
         title={teamMode ? 'Add opndoor team member' : 'Add user'}
-        sub="Invite a partner team member and set their access level."
+        sub={teamMode ? 'Add an opndoor admin. They sit above all partners with full control of the portal.' : 'Invite a partner team member and set their access level.'}
         footer={<><Button variant="ghost" onClick={() => setAddOpen(false)}>Cancel</Button><Button variant="primary" onClick={sendInvite} arrow>Send invite</Button></>}
       >
         <div className="form-grid">
@@ -281,7 +422,7 @@ export function UserManagement() {
           )}
         </div>
         <Field label="Role">
-          <RoleOptions options={addOptions} selected={addRole} onSelect={setAddRole} showSuperadmin={teamMode} />
+          <RoleOptions options={addOptions} selected={addRole} onSelect={setAddRole} />
         </Field>
       </Modal>
 
@@ -290,12 +431,41 @@ export function UserManagement() {
         open={editUser !== null}
         onClose={() => setEditUser(null)}
         title={<>Edit role · {editUser?.name ?? 'User'}</>}
-        sub={editUser ? emailOf(editUser.name) : ''}
-        footer={<><Button variant="ghost" onClick={() => setEditUser(null)}>Cancel</Button><Button variant="primary" onClick={saveRole}>Save role</Button></>}
+        sub={editUser ? userEmail(editUser) : ''}
+        footer={<><Button variant="ghost" onClick={() => setEditUser(null)}>Cancel</Button><Button variant="primary" onClick={requestSaveRole} disabled={editTargetIsTeam}>Save role</Button></>}
       >
-        <Field label="Role">
-          <RoleOptions options={ROLE_OPTIONS} selected={editRole} onSelect={setEditRole} showSuperadmin={role === 'superadmin'} />
-        </Field>
+        {editTargetIsTeam ? (
+          <p className="soft" style={{ fontSize: 13, marginBottom: 6 }}>opndoor admin is the only role for internal staff. To move someone to a partner, they must be re-invited under that partner.</p>
+        ) : (
+          <Field label="Role">
+            <RoleOptions options={editRoleOptions} selected={editRole} onSelect={setEditRole} />
+          </Field>
+        )}
+        {editAudit.length > 0 && (
+          <div style={{ borderTop: '1px solid var(--line)', paddingTop: 14, marginTop: 14 }}>
+            <div style={{ fontFamily: 'var(--display)', fontWeight: 700, fontSize: 13.5, marginBottom: 8 }}>Recent changes</div>
+            <ul className="pm-audit">
+              {editAudit.map((e, i) => (
+                <li key={i} className="pm-audit__row">
+                  <span className="pm-audit__field">{AUDIT_LABEL[e.action] ?? e.action}</span>
+                  <span className="pm-audit__delta">{e.oldValue} → <b>{e.newValue}</b></span>
+                  <span className="pm-audit__meta">{e.actor} · {dmy(e.at)}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+      </Modal>
+
+      {/* CONFIRM (role change / deactivate / reactivate / reset 2FA) */}
+      <Modal
+        open={!!confirm}
+        onClose={() => !busy && setConfirm(null)}
+        width={440}
+        title={confirm?.title ?? ''}
+        footer={<><Button variant="ghost" onClick={() => setConfirm(null)} disabled={busy}>Cancel</Button><Button variant="primary" className={confirm?.danger ? 'btn--danger' : undefined} onClick={runConfirm} disabled={busy}>{busy ? 'Working…' : confirm?.confirmLabel}</Button></>}
+      >
+        <p style={{ fontSize: 13.5, color: 'var(--ink-soft)', lineHeight: 1.55 }}>{confirm?.body}</p>
       </Modal>
     </>
   );

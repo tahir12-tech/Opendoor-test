@@ -48,10 +48,18 @@ export interface AuthResult {
   error?: string;
 }
 
-/** Step 1: email + password. Establishes an AAL1 session. */
+/** Step 1: email + password. Establishes an AAL1 session. A deactivated (banned)
+    account is blocked here; we surface a clean, partner-safe message and never
+    the raw GoTrue error. */
 export async function signIn(email: string, password: string): Promise<AuthResult> {
   const { error } = await sb().auth.signInWithPassword({ email: email.trim(), password });
-  return error ? { ok: false, error: error.message } : { ok: true };
+  if (!error) return { ok: true };
+  const msg = (error.message || '').toLowerCase();
+  const code = ((error as { code?: string }).code || '').toLowerCase();
+  if (code === 'user_banned' || msg.includes('banned')) {
+    return { ok: false, error: 'This account has been deactivated. Contact your administrator.' };
+  }
+  return { ok: false, error: 'Wrong email or password.' };
 }
 
 export interface FactorState {
@@ -80,24 +88,39 @@ export interface EnrolResult extends AuthResult {
   uri?: string;
 }
 
-/** Begin TOTP enrolment: returns a QR code + secret to add to an authenticator. */
+/** Begin TOTP enrolment: returns a QR code + secret to add to an authenticator.
+    Robust against a stale factor left by an abandoned attempt (which otherwise
+    surfaced a raw "a factor with the friendly name '' already exists" error): we
+    drop unverified factors first, and if enrolment still collides we clear every
+    TOTP factor and retry once. Any failure returns a clean, mapped message. */
 export async function enrolTotp(): Promise<EnrolResult> {
-  // Drop any unverified factor left over from an abandoned attempt.
-  const { data: existing } = await sb().auth.mfa.listFactors();
-  for (const f of (existing?.totp ?? []).filter((x) => x.status !== 'verified')) {
-    await sb().auth.mfa.unenroll({ factorId: f.id });
+  const dropUnverified = async () => {
+    const { data } = await sb().auth.mfa.listFactors();
+    for (const f of (data?.totp ?? []).filter((x) => x.status !== 'verified')) {
+      await sb().auth.mfa.unenroll({ factorId: f.id });
+    }
+  };
+  await dropUnverified();
+  let res = await sb().auth.mfa.enroll({ factorType: 'totp' });
+  if (res.error && /already exists|friendly name/i.test(res.error.message)) {
+    // A leftover factor is blocking a fresh enrolment: clear all TOTP factors and retry once.
+    const { data } = await sb().auth.mfa.listFactors();
+    for (const f of (data?.totp ?? [])) await sb().auth.mfa.unenroll({ factorId: f.id });
+    res = await sb().auth.mfa.enroll({ factorType: 'totp' });
   }
-  const { data, error } = await sb().auth.mfa.enroll({ factorType: 'totp' });
-  if (error || !data) return { ok: false, error: error?.message ?? 'Could not start enrolment' };
-  return { ok: true, factorId: data.id, qr: data.totp.qr_code, secret: data.totp.secret, uri: data.totp.uri };
+  if (res.error || !res.data) {
+    return { ok: false, error: 'We could not start two-factor setup. Please try again, or ask your administrator to reset your 2FA.' };
+  }
+  return { ok: true, factorId: res.data.id, qr: res.data.totp.qr_code, secret: res.data.totp.secret, uri: res.data.totp.uri };
 }
 
-/** Verify a 6-digit code against a factor (enrolment or step-up). Reaches AAL2. */
+/** Verify a 6-digit code against a factor (enrolment or step-up). Reaches AAL2.
+    Returns clean, mapped messages (never the raw GoTrue error). */
 export async function verifyCode(factorId: string, code: string): Promise<AuthResult> {
   const { data: challenge, error: cErr } = await sb().auth.mfa.challenge({ factorId });
-  if (cErr || !challenge) return { ok: false, error: cErr?.message ?? 'Could not start verification' };
+  if (cErr || !challenge) return { ok: false, error: 'We could not verify that code. Please try again.' };
   const { error } = await sb().auth.mfa.verify({ factorId, challengeId: challenge.id, code });
-  return error ? { ok: false, error: error.message } : { ok: true };
+  return error ? { ok: false, error: 'That code was not right. Try again.' } : { ok: true };
 }
 
 export async function signOut(): Promise<void> {

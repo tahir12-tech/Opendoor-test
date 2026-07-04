@@ -23,6 +23,7 @@ import { hydrateFromSupabase } from '@/lib/hydrate';
 export type SessionStatus = 'loading' | 'signedOut' | 'needsMfa' | 'ready';
 
 interface Profile {
+  userId: string;
   role: Role;
   name: string;
   email: string;
@@ -35,6 +36,8 @@ interface SessionValue {
   setRole: (role: Role) => void;
   /** The signed-in identity (sidebar footer, activity). */
   user: RoleIdentity;
+  /** The signed-in user's id (Supabase mode), for self-action guards. Null in mock mode. */
+  currentUserId: string | null;
   partnerScope: PartnerScope;
   selectedPartner: PartnerScope;
   setSelectedPartner: (id: PartnerScope) => void;
@@ -149,7 +152,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       const userId = session.user.id;
       const { data, error } = await supabase
         .from('users')
-        .select('role, full_name, email, partner:partners(slug)')
+        .select('role, full_name, email, status, partner:partners(slug)')
         .eq('id', userId)
         .single();
       if (error || !data) {
@@ -157,7 +160,20 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         setStatus('needsMfa');
         return;
       }
+      // Deactivated mid-session: the ban revoked their refresh token, but a
+      // still-valid access token could otherwise linger until it expires. Sign
+      // out immediately on any app load so deactivation takes effect at once.
+      if ((data.status as string) === 'deactivated') {
+        await supabase.auth.signOut();
+        hydratedFor.current = null;
+        hydration.current = null;
+        setProfile(null);
+        setAuthError('This account has been deactivated. Contact your administrator.');
+        setStatus('signedOut');
+        return;
+      }
       const prof: Profile = {
+        userId,
         role: data.role as Role,
         name: data.full_name as string,
         email: data.email as string,
@@ -238,10 +254,10 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     : ROLES[role];
 
   const value = useMemo<SessionValue>(
-    () => ({ role, setRole, user, partnerScope, selectedPartner, setSelectedPartner, period, setPeriod, status, authError, markMfaVerified, signOut, refresh }),
+    () => ({ role, setRole, user, currentUserId: profile?.userId ?? null, partnerScope, selectedPartner, setSelectedPartner, period, setPeriod, status, authError, markMfaVerified, signOut, refresh }),
     // dataVersion is intentionally a dep: bumping it after (re-)hydration changes
     // the context identity so consumers re-read the refreshed working copies.
-    [role, setRole, user, partnerScope, selectedPartner, setSelectedPartner, period, setPeriod, status, authError, markMfaVerified, signOut, refresh, dataVersion],
+    [role, setRole, user, profile, partnerScope, selectedPartner, setSelectedPartner, period, setPeriod, status, authError, markMfaVerified, signOut, refresh, dataVersion],
   );
 
   return <SessionContext.Provider value={value}>{children}</SessionContext.Provider>;

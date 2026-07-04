@@ -81,7 +81,9 @@ export async function hydrateFromSupabase(userId: string): Promise<void> {
   const client = sb();
   const [partnersRes, usersRes, agenciesRes, branchesRes, contactsRes, appsRes] = await Promise.all([
     client.from('partners').select('id, slug, name, status, live_from, partner_rate, agent_rate, is_primary'),
-    client.from('users').select('id, full_name, email, role, status, last_active_at, partner_id, partner:partners(slug)'),
+    // Admin user list via RPC: TRUTHFUL last-active (auth.users.last_sign_in_at)
+    // and status/role, visibility-scoped like the users_select RLS policy.
+    client.rpc('list_managed_users'),
     client.from('agencies').select('id, name, group_name, unreviewed, partner_id, partner:partners(slug)'),
     client.from('branches').select('id, name, area, unreviewed, agency_id, partner_id'),
     client.from('agent_contacts').select('id, name, email, phone, contact_role, is_primary, agency_id, branch_id'),
@@ -117,20 +119,23 @@ export async function hydrateFromSupabase(userId: string): Promise<void> {
   const fullName = (a: any): string => `${a.tenant_first_name} ${a.tenant_last_name}`;
   const ownerFlag = (a: any): number => (a.referrer_id === userId ? 1 : 0);
 
-  /* ---- users ---- */
+  /* ---- users (from list_managed_users: real last-active + email) ---- */
   const usersOut: ManagedUser[] = users.map((u) => ({
     id: u.id,
     name: u.full_name,
+    email: u.email,
     role: u.role,
-    lastActive: relTime(u.last_active_at, u.status),
+    // Truthful: relative time since the real last sign-in (auth.users), or a
+    // "Pending invite" / "Never signed in" placeholder from status.
+    lastActive: relTime(u.last_sign_in_at, u.status),
     status: u.status,
-    partner: u.role === 'superadmin' ? 'opndoor' : (emb(u.partner)?.slug ?? ''),
+    partner: u.role === 'superadmin' ? 'opndoor' : (u.partner_slug ?? ''),
   }));
 
   /* ---- partners (with derived weight/users/apps counts) ---- */
   const usersByPartner: Record<string, number> = {};
   users.forEach((u) => {
-    const s = emb(u.partner)?.slug;
+    const s = u.partner_slug;
     if (s) usersByPartner[s] = (usersByPartner[s] || 0) + 1;
   });
   const appsByPartner: Record<string, number> = {};

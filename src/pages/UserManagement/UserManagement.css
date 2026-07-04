@@ -58,6 +58,11 @@
 .rowmenu.is-open .rowmenu__pop {
   display: block;
 }
+/* Flip upward when there is not enough room below (bottom rows near the viewport edge). */
+.rowmenu--up .rowmenu__pop {
+  top: auto;
+  bottom: calc(100% + 4px);
+}
 .rowmenu__item {
   display: flex;
   align-items: center;
@@ -196,4 +201,48 @@
   font-family: var(--body);
   font-size: 13px;
   width: 100%;
+}
+
+/* Danger-tinted confirm button (deactivate). */
+.btn.btn--danger {
+  background: var(--danger);
+  border-color: var(--danger);
+  color: #fff;
+}
+.btn.btn--danger:hover {
+  filter: brightness(0.94);
+}
+
+/* User lifecycle audit trail (edit-role modal). */
+.pm-audit {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.pm-audit__row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  row-gap: 2px;
+  padding: 9px 11px;
+  background: var(--app-bg, #f7f7fb);
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm, 8px);
+  font-size: 12.5px;
+}
+.pm-audit__field {
+  font-weight: 700;
+  color: var(--ink);
+}
+.pm-audit__delta {
+  color: var(--ink-soft);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+.pm-audit__meta {
+  grid-column: 1 / -1;
+  color: var(--ink-mute);
+  font-size: 11.5px;
 }

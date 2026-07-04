@@ -12,6 +12,7 @@
 import type { Role, User, UserStatus } from './types';
 import { ALL_PARTNERS } from './types';
 import { getSelectedPartner, homePartner, partnerName } from './partnersService';
+import { SUPABASE_ENABLED, sb } from '@/lib/supabase';
 
 // [name, role, lastActive, status, partner] — ported from user-management.html
 const SEED: [string, Role, string, UserStatus, string][] = [
@@ -37,15 +38,20 @@ export interface ManagedUser extends User {
   id: string;
 }
 
-let USERS: ManagedUser[] = SEED.map((u, i) => ({ id: `u${i}`, name: u[0], role: u[1], lastActive: u[2], status: u[3], partner: u[4] }));
+export function emailOf(name: string): string {
+  return `${name.toLowerCase().replace(/ /g, '.')}@brackenhouse.co.uk`;
+}
+
+let USERS: ManagedUser[] = SEED.map((u, i) => ({ id: `u${i}`, name: u[0], email: emailOf(u[0]), role: u[1], lastActive: u[2], status: u[3], partner: u[4] }));
 
 /** Replace the users working copy from the back end (Supabase mode). */
 export function hydrateUsers(users: ManagedUser[]): void {
   USERS = users.slice();
 }
 
-export function emailOf(name: string): string {
-  return `${name.toLowerCase().replace(/ /g, '.')}@brackenhouse.co.uk`;
+/** Display email for a managed user (real in Supabase mode, derived otherwise). */
+export function userEmail(u: ManagedUser): string {
+  return u.email || emailOf(u.name);
 }
 
 export interface GetUsersOpts {
@@ -68,19 +74,95 @@ export function getUsers(opts: GetUsersOpts): ManagedUser[] {
   });
 }
 
-export function updateUserRole(id: string, role: Role): ManagedUser | null {
-  const u = USERS.find((x) => x.id === id);
-  if (!u) return null;
-  u.role = role;
-  return u;
+/* ---- User lifecycle actions (Supabase RPCs in live mode; working copy + audit
+   in mock mode). Every rule (role wall, self/last-admin guard) is enforced
+   server-side in the RPC; the client mirrors it for a clean UX. ---- */
+
+export type UserAction = 'status' | 'role' | 'reset_mfa';
+export interface UserAuditEntry {
+  action: UserAction | string;
+  oldValue: string;
+  newValue: string;
+  actor: string;
+  at: Date;
 }
 
-export function deactivateUser(id: string): ManagedUser | null {
+// Mock/test audit store, keyed by user id. Supabase mode uses the user_audit table.
+const USER_AUDIT: Record<string, UserAuditEntry[]> = {};
+function recordUserAudit(id: string, action: UserAction, oldValue: string, newValue: string): void {
+  USER_AUDIT[id] = [{ action, oldValue, newValue, actor: 'You', at: new Date() }, ...(USER_AUDIT[id] ?? [])];
+}
+
+/** Change a user's role (Referrer/Management/opndoor admin), behind the role wall. */
+export async function updateUserRole(id: string, role: Role): Promise<void> {
   const u = USERS.find((x) => x.id === id);
-  if (!u) return null;
-  u.status = 'pending';
-  u.lastActive = 'Deactivated';
-  return u;
+  if (!u) throw new Error('User not found.');
+  if (SUPABASE_ENABLED) {
+    const { error } = await sb().rpc('admin_update_user_role', { p_user: id, p_role: role });
+    if (error) throw new Error(error.message);
+    return; // caller re-hydrates
+  }
+  const old = u.role;
+  if (old !== role) recordUserAudit(id, 'role', old, role);
+  u.role = role;
+}
+
+/** Deactivate or reactivate a user (ban/unban + revoke sessions in live mode). */
+export async function setUserStatus(id: string, status: 'active' | 'deactivated'): Promise<void> {
+  const u = USERS.find((x) => x.id === id);
+  if (!u) throw new Error('User not found.');
+  if (SUPABASE_ENABLED) {
+    const { error } = await sb().rpc('admin_set_user_status', { p_user: id, p_status: status });
+    if (error) throw new Error(error.message);
+    return;
+  }
+  const old = u.status;
+  if (old !== status) recordUserAudit(id, 'status', old, status);
+  u.status = status;
+}
+
+/** Reset a user's 2FA: they re-enrol at next sign in. */
+export async function resetUserMfa(id: string): Promise<void> {
+  const u = USERS.find((x) => x.id === id);
+  if (!u) throw new Error('User not found.');
+  if (SUPABASE_ENABLED) {
+    const { error } = await sb().rpc('admin_reset_user_mfa', { p_user: id });
+    if (error) throw new Error(error.message);
+    return;
+  }
+  recordUserAudit(id, 'reset_mfa', 'enrolled', 'reset');
+}
+
+/** Send a password-reset link to a user's email (live mode). No-op in mock mode. */
+export async function resetUserPassword(id: string): Promise<void> {
+  const u = USERS.find((x) => x.id === id);
+  if (!u) throw new Error('User not found.');
+  if (SUPABASE_ENABLED) {
+    const { error } = await sb().auth.resetPasswordForEmail(userEmail(u));
+    if (error) throw new Error(error.message);
+  }
+}
+
+/** Recent lifecycle changes for a user (most recent first). Admin/management scoped. */
+export async function getUserAudit(id: string): Promise<UserAuditEntry[]> {
+  if (SUPABASE_ENABLED) {
+    const { data, error } = await sb()
+      .from('user_audit')
+      .select('action, old_value, new_value, actor, at')
+      .eq('target_user', id)
+      .order('at', { ascending: false })
+      .limit(20);
+    if (error) throw new Error(error.message);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    return (data ?? []).map((r: any) => ({
+      action: r.action,
+      oldValue: r.old_value ?? '',
+      newValue: r.new_value ?? '',
+      actor: r.actor ?? 'an administrator',
+      at: new Date(r.at),
+    }));
+  }
+  return USER_AUDIT[id] ?? [];
 }
 
 export interface AddUserInput {
@@ -94,7 +176,7 @@ export interface AddUserInput {
 export function addUser(input: AddUserInput): ManagedUser {
   const name = `${input.firstName || 'New'} ${input.lastName || 'User'}`;
   const partner = input.role === 'superadmin' ? 'opndoor' : input.partner || homePartner();
-  const rec: ManagedUser = { id: `u${USERS.length}_${Math.round(performance.now())}`, name, role: input.role, lastActive: 'Pending invite', status: 'pending', partner };
+  const rec: ManagedUser = { id: `u${USERS.length}_${Math.round(performance.now())}`, name, email: input.email.trim() || emailOf(name), role: input.role, lastActive: 'Pending invite', status: 'pending', partner };
   USERS.push(rec);
   return rec;
 }

@@ -19,7 +19,7 @@ export type DeedState = 'awaiting_tenant' | 'executed' | 'declined' | 'voided' |
 /** Guarantor-fee payment state (DB-enforced set). */
 export type PaymentState = 'awaiting' | 'paid' | 'refunded';
 export type PartnerStatus = 'active' | 'onboarding' | 'paused';
-export type UserStatus = 'active' | 'pending';
+export type UserStatus = 'active' | 'pending' | 'deactivated';
 
 /* ---------- Partner ---------- */
 export interface Partner {
@@ -88,6 +88,8 @@ export interface Agency {
 /* ---------- User ---------- */
 export interface User {
   name: string;
+  /** Work email (real in Supabase mode; derived in mock mode). */
+  email: string;
   role: Role;
   lastActive: string;
   status: UserStatus;
