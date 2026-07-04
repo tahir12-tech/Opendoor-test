@@ -224,7 +224,8 @@ export function OrgManagement() {
     if (!ctAgency || busy) return;
     const name = ctName.trim();
     const email = ctEmail.trim();
-    if (!name || !email) return;
+    // Email is the load-bearing field (#72); the name is optional.
+    if (!email) { toast('Enter a contact email.'); return; }
     if (!EMAIL_RE.test(email)) { toast('Enter a valid contact email.'); return; }
     const rec: AgentContact = { name, role: ctRole.trim(), email, phone: ctPhone.trim(), primary: ctPrimary };
     if (ctEditIndex !== null) {

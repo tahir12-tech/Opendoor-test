@@ -109,22 +109,24 @@ export interface EnrolResult extends AuthResult {
     drop unverified factors first, and if enrolment still collides we clear every
     TOTP factor and retry once. Any failure returns a clean, mapped message. */
 export async function enrolTotp(): Promise<EnrolResult> {
-  const dropUnverified = async () => {
+  // enrolTotp is only reached when the user has NO verified factor, so any
+  // factors present are stale unverified attempts. Clear them all (best effort),
+  // then enrol with a UNIQUE friendly name. The unique name is what makes this
+  // bulletproof: the default empty name collides ("a factor with the friendly
+  // name '' already exists") whenever a stale factor lingers, which previously
+  // stranded invitees at the two-factor step. On failure we surface the real
+  // GoTrue message rather than a blanket one.
+  try {
     const { data } = await sb().auth.mfa.listFactors();
-    for (const f of (data?.totp ?? []).filter((x) => x.status !== 'verified')) {
-      await sb().auth.mfa.unenroll({ factorId: f.id });
+    for (const f of (data?.totp ?? [])) {
+      try { await sb().auth.mfa.unenroll({ factorId: f.id }); } catch { /* best effort */ }
     }
-  };
-  await dropUnverified();
-  let res = await sb().auth.mfa.enroll({ factorType: 'totp' });
-  if (res.error && /already exists|friendly name/i.test(res.error.message)) {
-    // A leftover factor is blocking a fresh enrolment: clear all TOTP factors and retry once.
-    const { data } = await sb().auth.mfa.listFactors();
-    for (const f of (data?.totp ?? [])) await sb().auth.mfa.unenroll({ factorId: f.id });
-    res = await sb().auth.mfa.enroll({ factorType: 'totp' });
-  }
+  } catch { /* best effort */ }
+  const friendlyName = `opndoor ${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+  const res = await sb().auth.mfa.enroll({ factorType: 'totp', friendlyName });
   if (res.error || !res.data) {
-    return { ok: false, error: 'We could not start two-factor setup. Please try again, or ask your administrator to reset your 2FA.' };
+    const detail = res.error?.message;
+    return { ok: false, error: detail ? `We could not start two-factor setup: ${detail}` : 'We could not start two-factor setup. Please try again, or ask your administrator to reset your 2FA.' };
   }
   return { ok: true, factorId: res.data.id, qr: res.data.totp.qr_code, secret: res.data.totp.secret, uri: res.data.totp.uri };
 }

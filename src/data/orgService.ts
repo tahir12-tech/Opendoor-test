@@ -252,7 +252,7 @@ export async function createAgencyLive(input: CreateAgencyInput, scope: PartnerS
   }
   const ag = addAgency({ name: input.name, group: input.group }, scope);
   addContact(ag.name, null, {
-    name: input.contactName?.trim() || input.contactEmail,
+    name: input.contactName?.trim() || '',
     email: input.contactEmail, phone: input.contactPhone?.trim() || '', role: '', primary: true,
   });
 }
@@ -284,7 +284,7 @@ export async function createBranchLive(agency: Agency, input: CreateBranchInput)
   const br = addBranch(agency.name, { name: input.name, area: input.area });
   if (br && input.contactEmail?.trim()) {
     addContact(agency.name, br.name, {
-      name: input.contactName?.trim() || input.contactEmail.trim(),
+      name: input.contactName?.trim() || '',
       email: input.contactEmail.trim(), phone: input.contactPhone?.trim() || '', role: '', primary: true,
     });
   }

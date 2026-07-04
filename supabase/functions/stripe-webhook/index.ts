@@ -81,7 +81,8 @@ Deno.serve(async (req) => {
           // Branded refund confirmation to the tenant (redirected to the review
           // address in test mode). Idempotent: the whole charge.refunded block
           // runs once per event via the stripe_events dedup above.
-          const amountGBP = `£${refundAmount.toLocaleString("en-GB", { minimumFractionDigits: 0, maximumFractionDigits: 2 })}`;
+          // Whole pounds show no decimals; a partial refund shows exactly two.
+          const amountGBP = `£${refundAmount.toLocaleString("en-GB", { minimumFractionDigits: refundAmount % 1 === 0 ? 0 : 2, maximumFractionDigits: 2 })}`;
           await deliverRefund(service, {
             appId: appRow.id,
             tenantEmail: appRow.tenant_email,

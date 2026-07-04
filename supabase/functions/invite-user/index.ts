@@ -75,9 +75,18 @@ Deno.serve(async (req) => {
 
     // New vs re-invite: an existing portal user gets a recovery (set-password)
     // link; a new one is created by the invite link.
-    const { data: existing } = await service.from("users").select("id").ilike("email", email).maybeSingle();
+    const { data: existing } = await service.from("users").select("id, role, partner_id").ilike("email", email).maybeSingle();
     let link: string | undefined;
     let targetUserId: string | undefined = existing?.id;
+
+    // Re-inviting must respect the SAME scope as inviting: management may only
+    // re-invite referrers/managers in their own partner. Without this, the
+    // service-role lookup would let management trigger a set-password link and an
+    // audit row for any account (a superadmin's, or another partner's).
+    if (existing && caller.role !== "superadmin") {
+      const outOfScope = existing.partner_id !== inviteePartnerId || !["referrer", "management"].includes(existing.role);
+      if (outOfScope) return json({ ok: false, error: "Not permitted." }, 403);
+    }
 
     if (existing) {
       const { data, error } = await service.auth.admin.generateLink({

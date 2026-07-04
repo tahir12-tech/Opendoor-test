@@ -725,12 +725,15 @@ function leagueColumns(view: LeagueView): Column[] {
   if (view === 'referrer') return [first, ...core];
   return [first, { header: 'Detail', type: 'text' }, ...core, { header: 'Partner commission', type: 'money' }, { header: 'Agent commission', type: 'money' }];
 }
-function leagueRows(view: LeagueView, rows: LeagueRow[]): TableRow[] {
-  return rows.map((r) =>
-    view === 'referrer'
+function leagueRows(view: LeagueView, rows: LeagueRow[], showPartner: boolean): TableRow[] {
+  return rows.map((r) => {
+    // Keep per-row partner attribution in the export when viewing across
+    // partners (the on-screen Partner tag's export twin, #52).
+    const detail = showPartner && r.partner ? `${r.sub}${r.sub ? ' · ' : ''}${r.partner}` : r.sub;
+    return view === 'referrer'
       ? [r.name, r.refs, r.fees, r.paid, r.deed, r.sp, r.conv]
-      : [r.name, r.sub, r.refs, r.fees, r.paid, r.deed, r.sp, r.conv, r.partnerComm, r.agentComm],
-  );
+      : [r.name, detail, r.refs, r.fees, r.paid, r.deed, r.sp, r.conv, r.partnerComm, r.agentComm];
+  });
 }
 
 /**
@@ -755,12 +758,13 @@ export function buildLeagueDoc(role: Role, scope: PartnerScope, partner: string,
   } else {
     metaLine = brandMeta(period, scopeText, partnerLabel);
   }
+  const showPartner = scope === ALL_PARTNERS && !partner;
   const sheets = views.map(({ view, name }) => ({
     name,
     doc: {
       reportName: `League table: ${name}`,
       metaLine,
-      blocks: [{ kind: 'table', columns: leagueColumns(view), rows: leagueRows(view, getLeague(view, { role, scope, partner, period })) }],
+      blocks: [{ kind: 'table', columns: leagueColumns(view), rows: leagueRows(view, getLeague(view, { role, scope, partner, period }), showPartner) }],
     } as BrandedDoc,
   }));
   return { sheets, filename: `opndoor-league-${fileStamp()}.xlsx` };
