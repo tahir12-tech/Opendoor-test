@@ -9,17 +9,16 @@
      render smoke tests meaningful and lets the app run with no back end.
 
    SESSION LIFETIME (this portal holds tenant PII, so sessions are deliberately
-   short-lived): the auth token is stored in sessionStorage, NOT localStorage.
-   sessionStorage is scoped to the tab/window and is normally discarded when the
-   browser is fully closed — but it is NOT an unconditional guarantee: browser
-   "restore last session" / crash recovery can re-hydrate it into a new runtime.
-   So sessionStorage alone is necessary but not sufficient. The hard guarantee
-   lives in SessionContext: AAL2 is trusted only when TOTP was verified in the
-   CURRENT page runtime (a non-persisted in-memory marker). The real-world
-   behaviour is therefore: a same-tab refresh keeps you signed in; a browser quit
-   (or any restore into a fresh runtime) forces a fresh TOTP challenge before any
-   data loads, because the in-memory marker cannot be restored from storage.
-   There is no "keep me signed in" opt-out.
+   short-lived): the auth token is stored in localStorage, so it is SHARED across
+   tabs — opening a link in a new tab keeps you signed in. To stop that same
+   shared token from surviving a full browser quit, it is paired with a
+   cross-tab "browser session alive" heartbeat (see session/browserSession.ts):
+   on a fresh page runtime SessionContext resumes an AAL2 session only if the
+   heartbeat shows the browser was alive within the last few seconds, and
+   otherwise forces a fresh sign-in including TOTP. Real-world behaviour: same-tab
+   refresh = signed in; new tab = signed in; full browser quit/reopen = full
+   re-authentication. There is no long-lived "keep me signed in" (the window is
+   seconds, not days), and the in-runtime AAL2 marker is the additional belt.
    ===================================================================== */
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 
@@ -35,10 +34,10 @@ export const supabase: SupabaseClient | null =
     ? createClient(url, key, {
         auth: {
           persistSession: true,
-          // sessionStorage (not the default localStorage): tab-scoped and normally
-          // discarded on browser quit. The definitive re-auth guarantee is the
-          // in-runtime AAL2 marker in SessionContext, not this storage choice.
-          storage: typeof window !== 'undefined' ? window.sessionStorage : undefined,
+          // localStorage (the default): shared across tabs so a new tab stays
+          // signed in. Quit-survival is bounded not by the storage choice but by
+          // the browser-session heartbeat + in-runtime AAL2 marker (SessionContext).
+          storage: typeof window !== 'undefined' ? window.localStorage : undefined,
           autoRefreshToken: true,
           detectSessionInUrl: true,
         },

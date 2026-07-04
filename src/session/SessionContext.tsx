@@ -19,6 +19,7 @@ import { KEYS, loadString, saveString } from '@/data/storage';
 import { ROLES, type RoleIdentity } from '@/constants/roles';
 import { SUPABASE_ENABLED, supabase } from '@/lib/supabase';
 import { hydrateFromSupabase } from '@/lib/hydrate';
+import { anyTabAlive, clearSessionAlive, sessionRecentlyAlive, startHeartbeat, stopHeartbeat } from '@/session/browserSession';
 
 export type SessionStatus = 'loading' | 'signedOut' | 'needsMfa' | 'ready';
 
@@ -68,24 +69,11 @@ function initialsOf(name: string): string {
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const emb = (x: any): any => (Array.isArray(x) ? x[0] : x);
 
-// In-memory (per-runtime, NON-persisted) proof that TOTP was verified in THIS
-// page runtime. It resets on every fresh page load, so it cannot be restored
-// from storage. A restored AAL2 session (browser session-restore / crash
-// recovery re-hydrating sessionStorage, or a cold new runtime) is therefore not
-// trusted as AAL2 until re-verified — the belt to sessionStorage's braces.
+// In-memory (per-runtime, NON-persisted) proof that this runtime's AAL2 session
+// is trusted — set once we either resume a still-live browser session or verify
+// a fresh TOTP. It resets on every fresh page load, so it can never be restored
+// from storage; the shared token in localStorage is inert without it.
 let mfaTrustedThisRuntime = false;
-
-/** True when this page load is a genuine same-tab reload (F5/Cmd-R), as opposed
-    to a fresh navigation, new tab, browser restart or restore. Used to keep a
-    deliberate refresh signed in while forcing re-verification on a cold start. */
-function isPageReload(): boolean {
-  try {
-    const nav = performance.getEntriesByType('navigation')[0] as PerformanceNavigationTiming | undefined;
-    return nav?.type === 'reload';
-  } catch {
-    return false;
-  }
-}
 
 export function SessionProvider({ children }: { children: ReactNode }) {
   const [role, setRoleState] = useState<Role>(initialRole);
@@ -136,19 +124,23 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         setStatus('needsMfa');
         return;
       }
-      // Belt to sessionStorage's braces: even if the token store reports AAL2,
-      // only trust it when TOTP was verified in THIS runtime. A restored session
-      // (browser session-restore, crash recovery re-hydrating sessionStorage) has
-      // no such proof, so we force a fresh TOTP challenge. A deliberate same-tab
-      // reload (F5) is the one exception — we adopt its AAL2 and stay signed in.
+      // The token in localStorage is shared across tabs and survives a browser
+      // quit, so a stored AAL2 level is not sufficient on its own. Trust it only
+      // when this runtime already verified TOTP, OR when a tab was recently alive
+      // (a same-tab refresh or a new tab of a still-live session): a fresh heartbeat
+      // stamp, or — if the stamp looks stale because a backgrounded tab's timer was
+      // throttled — a live tab answering the liveness ping. A cold start after a
+      // full quit has neither, so we force a fresh TOTP challenge.
       if (!mfaTrustedThisRuntime) {
-        if (isPageReload()) {
+        if (sessionRecentlyAlive() || (await anyTabAlive())) {
           mfaTrustedThisRuntime = true;
         } else {
           setStatus('needsMfa');
           return;
         }
       }
+      // Trusted: keep the heartbeat fresh so other tabs and the next refresh resume.
+      startHeartbeat();
       const userId = session.user.id;
       const { data, error } = await supabase
         .from('users')
@@ -165,6 +157,9 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       // out immediately on any app load so deactivation takes effect at once.
       if ((data.status as string) === 'deactivated') {
         await supabase.auth.signOut();
+        mfaTrustedThisRuntime = false;
+        stopHeartbeat();
+        clearSessionAlive();
         hydratedFor.current = null;
         hydration.current = null;
         setProfile(null);
@@ -219,6 +214,9 @@ export function SessionProvider({ children }: { children: ReactNode }) {
 
   const markMfaVerified = useCallback(() => {
     mfaTrustedThisRuntime = true;
+    // Fresh TOTP verified: begin the heartbeat so a new tab or the next refresh
+    // resumes without re-authenticating (until the browser is fully closed).
+    startHeartbeat();
   }, []);
 
   const signOut = useCallback(async () => {
@@ -227,8 +225,11 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       // Drop the cached hydration promise: signing back in (even as the same
       // user, in-page with no reload) must re-fetch, not replay a stale snapshot.
       hydration.current = null;
-      // Revoke AAL2 trust: a fresh sign-in must re-verify TOTP, not inherit it.
+      // Revoke AAL2 trust and stop/forget the heartbeat: a fresh sign-in must
+      // re-verify TOTP, and a new tab must not resume off a stale liveness stamp.
       mfaTrustedThisRuntime = false;
+      stopHeartbeat();
+      clearSessionAlive();
       await authService.signOut();
       setProfile(null);
       setStatus('signedOut');
