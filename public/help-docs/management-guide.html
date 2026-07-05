@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>opndoor Guarantee Referral Portal — Management guide</title>
+<style>
+:root{--ink:#271D5F;--ink-soft:#5B4D86;--ink-mute:#8B80AD;--helio:#B54DE0;--helio-deep:#9A3ACB;--lilac:#F5EEFB;--lilac-line:#E9DEF5;--paper:#fff}
+*{box-sizing:border-box}
+html{-webkit-print-color-adjust:exact;print-color-adjust:exact;scroll-behavior:smooth}
+body{margin:0;font-family:'Manrope',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:var(--ink);background:#EFE9F6;line-height:1.65;font-size:15.5px;-webkit-font-smoothing:antialiased}
+.sheet{max-width:860px;margin:0 auto;background:var(--paper);min-height:100vh}
+.pad{padding:56px 64px 72px}
+.lockup{display:flex;align-items:center;gap:14px;margin-bottom:34px}
+.lockup__mark{font-family:'Sora',sans-serif;font-weight:800;font-size:26px;letter-spacing:-.02em;color:var(--helio)}
+.lockup__bar{width:1.5px;height:28px;background:var(--lilac-line)}
+.lockup__sub{font-size:10.5px;font-weight:700;letter-spacing:.14em;line-height:1.35;text-transform:uppercase;color:var(--helio)}
+.gated{display:inline-flex;align-items:center;gap:8px;background:var(--lilac);border-radius:999px;padding:5px 14px;font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--helio-deep);margin:0 0 16px}
+.gated::before{content:"";width:7px;height:7px;border-radius:50%;background:var(--helio)}
+.eyebrow{display:flex;align-items:center;gap:9px;font-size:12px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:var(--helio);margin:0 0 14px}
+.eyebrow::before{content:"";width:7px;height:7px;border-radius:50%;background:var(--helio)}
+h1{font-family:'Sora',sans-serif;font-weight:800;font-size:44px;line-height:1.05;letter-spacing:-.025em;color:var(--ink);margin:0 0 20px}
+.lead{font-size:19px;line-height:1.5;color:var(--ink-soft);margin:0;max-width:60ch}
+.rule{height:2px;background:var(--ink);border:0;margin:38px 0 6px}
+h2{font-family:'Sora',sans-serif;font-weight:800;font-size:25px;letter-spacing:-.01em;color:var(--ink);margin:40px 0 12px}
+h3{font-family:'Sora',sans-serif;font-weight:700;font-size:16.5px;color:var(--ink);margin:24px 0 6px}
+p{margin:0 0 14px;max-width:70ch}
+strong,b{font-weight:700;color:var(--ink)}
+ul,ol{margin:0 0 16px;padding-left:24px;max-width:70ch}
+li{margin:8px 0}
+a{color:var(--helio);font-weight:600;text-decoration:none}
+.callout{background:var(--lilac);border-radius:20px;padding:24px 28px;margin:24px 0}
+.callout__label{font-family:'Sora',sans-serif;font-weight:700;font-size:15px;color:var(--helio);margin:0 0 10px}
+.callout ul{margin:0;padding-left:22px}
+.callout li{margin:9px 0}
+.callout li::marker{color:var(--helio)}
+table{width:100%;border-collapse:collapse;margin:16px 0;font-size:14.5px}
+th,td{text-align:left;padding:11px 14px;border-bottom:1px solid var(--lilac-line);vertical-align:top}
+th{font-family:'Sora',sans-serif;font-weight:700;font-size:13px;color:var(--ink);background:var(--lilac)}
+.foot{margin-top:48px;padding-top:20px;border-top:1px solid var(--lilac-line);color:var(--ink-mute);font-size:12.5px}
+.printbtn{position:fixed;top:22px;right:22px;background:var(--helio);color:#fff;border:0;border-radius:999px;padding:12px 22px;font-weight:700;font-size:14px;cursor:pointer;box-shadow:0 8px 24px rgba(181,77,224,.38);font-family:inherit;z-index:50}
+.printbtn:hover{background:var(--helio-deep)}
+@media print{body{background:#fff;font-size:11pt}.sheet{max-width:none}.pad{padding:0}.printbtn{display:none}h1{font-size:31pt}h2{page-break-after:avoid}.callout,table{page-break-inside:avoid}a{color:var(--ink)}@page{margin:16mm 18mm}}
+@media(max-width:640px){.pad{padding:32px 24px 48px}h1{font-size:33px}.lead{font-size:17px}}
+</style>
+</head>
+<body>
+<button class="printbtn" onclick="window.print()">Save as PDF</button>
+<div class="sheet"><div class="pad">
+  <div class="lockup">
+    <span class="lockup__mark">opndoor</span>
+    <span class="lockup__bar"></span>
+    <span class="lockup__sub">Guarantee<br>Referral Portal</span>
+  </div>
+
+  <div class="gated">Management &amp; opndoor admin</div>
+  <h1>Running your estate</h1>
+  <p class="lead">The management view of the portal: analytics across your whole estate, the fee and commission, settlements, exports, and managing your agencies, branches and users.</p>
+
+  <hr class="rule">
+
+  <h2>What you can see</h2>
+  <p>Where a referrer sees only their own referrals, <b>management sees the whole estate</b> — every agency, branch and referrer in your partner. You can add and manage your own users, and every tracking and analytics surface aggregates across your network. You can't edit canonical records that opndoor owns, or portal settings.</p>
+
+  <h2>Estate analytics</h2>
+  <p>The dashboard's <b>Sent → Paid → Deed Issued</b> funnel, volume charts and breakdowns aggregate across your estate, reframed by the time-period selector (from the last 7 days through to all time). Period-clipped breakdown tables are labelled <i>within the selected period</i>, so a partial-period figure is never mistaken for a lifetime total.</p>
+
+  <h2>The fee &amp; commission</h2>
+  <p>The guarantor fee is <b>one month's rent</b> per referral. Commission is split from that fee:</p>
+  <table>
+    <tr><th>Party</th><th>Share of the fee</th></tr>
+    <tr><td>Partner</td><td>25%</td></tr>
+    <tr><td>Agent (the referring agency)</td><td>10%</td></tr>
+  </table>
+  <div class="callout">
+    <div class="callout__label">Referrers never see commission</div>
+    <ul>
+      <li>Fee and commission figures show to management and opndoor admins only.</li>
+      <li>Referrer-tier performance exports have every partner and agent commission line and column stripped out.</li>
+    </ul>
+  </div>
+
+  <h2>Settlements</h2>
+  <p>Commission settles on a monthly cycle: each settlement covers the <b>prior calendar month</b>, is calculated <b>net of refunds</b>, and is <b>payable on the 15th</b> of the following month. The settlement view gives one figure per partner with the constituent applications behind it.</p>
+
+  <h2>Exports</h2>
+  <ul>
+    <li><b>Performance export</b> — the analytics for the selected period as a branded workbook (referrer-tier exports omit commission).</li>
+    <li><b>Applications</b> — the underlying records for the current view.</li>
+  </ul>
+
+  <h2>Managing agencies &amp; branches</h2>
+  <p>On the <b>Agencies &amp; branches</b> screen you can edit an agency or branch's details, and the change takes effect <b>instantly</b>. Click any figure to drill through to the applications behind it.</p>
+
+  <h2>Managing users</h2>
+  <p>From <b>User management</b> you can invite users, set their role (management or referrer), and from each user's menu:</p>
+  <ul>
+    <li><b>Reset password</b> — sends a reset link.</li>
+    <li><b>Reset 2FA</b> — clears their authenticator so they re-enrol at next sign-in (audited). You can do this for your own partner's non-admin users; opndoor handles opndoor staff.</li>
+    <li><b>Deactivate / reactivate</b> — controls whether they can sign in.</li>
+  </ul>
+
+  <h2>The League</h2>
+  <p>The full <b>League</b> ranks every agency, branch and referrer, sortable by any metric and paged through in full. Rows drill through to the matching Applications filter — a referrer row opens that referrer's applications, an agency row opens the agency's. What each referrer sees on their own leaderboard is controlled from <b>Manage partner</b> (the single lever); changing it prompts a confirmation, because it changes what every referrer at that partner sees.</p>
+
+  <h2>Filtering applications</h2>
+  <p>The <b>Applications</b> screen adds two filters for your tier:</p>
+  <ul>
+    <li><b>Referrer</b> — narrow to one referrer's applications, populated from your scope's referrers.</li>
+    <li><b>Period</b> — the dashboard's time-period options, bucketed on sent date, with the status chips recounting within the selected period.</li>
+  </ul>
+  <p>These compose with the existing status, agency, branch and search filters, and honour deep-links (<code>?agency=</code>, <code>?branch=</code>, <code>?referrer=</code>) from the League and Agencies screens.</p>
+
+  <div class="foot">This guide describes management capabilities in the shipped portal. It's a practical guide, not a finance or legal document. © opndoor.</div>
+</div></div>
+</body>
+</html>

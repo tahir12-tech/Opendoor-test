@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>opndoor Guarantee Referral Portal — opndoor admin guide</title>
+<style>
+:root{--ink:#271D5F;--ink-soft:#5B4D86;--ink-mute:#8B80AD;--helio:#B54DE0;--helio-deep:#9A3ACB;--lilac:#F5EEFB;--lilac-line:#E9DEF5;--paper:#fff;--gold:#C99A2E;--gold-bg:#FBF6EC}
+*{box-sizing:border-box}
+html{-webkit-print-color-adjust:exact;print-color-adjust:exact;scroll-behavior:smooth}
+body{margin:0;font-family:'Manrope',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:var(--ink);background:#EFE9F6;line-height:1.65;font-size:15.5px;-webkit-font-smoothing:antialiased}
+.sheet{max-width:860px;margin:0 auto;background:var(--paper);min-height:100vh}
+.pad{padding:56px 64px 72px}
+.lockup{display:flex;align-items:center;gap:14px;margin-bottom:34px}
+.lockup__mark{font-family:'Sora',sans-serif;font-weight:800;font-size:26px;letter-spacing:-.02em;color:var(--helio)}
+.lockup__bar{width:1.5px;height:28px;background:var(--lilac-line)}
+.lockup__sub{font-size:10.5px;font-weight:700;letter-spacing:.14em;line-height:1.35;text-transform:uppercase;color:var(--helio)}
+.gated{display:inline-flex;align-items:center;gap:8px;background:var(--lilac);border-radius:999px;padding:5px 14px;font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--helio-deep);margin:0 0 16px}
+.gated::before{content:"";width:7px;height:7px;border-radius:50%;background:var(--helio)}
+h1{font-family:'Sora',sans-serif;font-weight:800;font-size:44px;line-height:1.05;letter-spacing:-.025em;color:var(--ink);margin:0 0 20px}
+.lead{font-size:19px;line-height:1.5;color:var(--ink-soft);margin:0;max-width:60ch}
+.rule{height:2px;background:var(--ink);border:0;margin:38px 0 6px}
+h2{font-family:'Sora',sans-serif;font-weight:800;font-size:25px;letter-spacing:-.01em;color:var(--ink);margin:40px 0 12px}
+h3{font-family:'Sora',sans-serif;font-weight:700;font-size:16.5px;color:var(--ink);margin:24px 0 6px}
+p{margin:0 0 14px;max-width:70ch}
+strong,b{font-weight:700;color:var(--ink)}
+ul,ol{margin:0 0 16px;padding-left:24px;max-width:70ch}
+li{margin:8px 0}
+a{color:var(--helio);font-weight:600;text-decoration:none}
+.callout{background:var(--lilac);border-radius:20px;padding:24px 28px;margin:24px 0}
+.callout__label{font-family:'Sora',sans-serif;font-weight:700;font-size:15px;color:var(--helio);margin:0 0 10px}
+.callout ul{margin:0;padding-left:22px}.callout li{margin:9px 0}.callout li::marker{color:var(--helio)}
+.law{background:var(--gold-bg);border-radius:20px;padding:22px 28px;margin:24px 0}
+.law__label{font-family:'Sora',sans-serif;font-weight:700;font-size:15px;color:#7A5E12;margin:0 0 8px}
+.law p{margin:0;color:#5b4d2a}
+table{width:100%;border-collapse:collapse;margin:16px 0;font-size:14.5px}
+th,td{text-align:left;padding:11px 14px;border-bottom:1px solid var(--lilac-line);vertical-align:top}
+th{font-family:'Sora',sans-serif;font-weight:700;font-size:13px;color:var(--ink);background:var(--lilac)}
+.foot{margin-top:48px;padding-top:20px;border-top:1px solid var(--lilac-line);color:var(--ink-mute);font-size:12.5px}
+.printbtn{position:fixed;top:22px;right:22px;background:var(--helio);color:#fff;border:0;border-radius:999px;padding:12px 22px;font-weight:700;font-size:14px;cursor:pointer;box-shadow:0 8px 24px rgba(181,77,224,.38);font-family:inherit;z-index:50}
+.printbtn:hover{background:var(--helio-deep)}
+@media print{body{background:#fff;font-size:11pt}.sheet{max-width:none}.pad{padding:0}.printbtn{display:none}h1{font-size:31pt}h2{page-break-after:avoid}.callout,.law,table{page-break-inside:avoid}a{color:var(--ink)}@page{margin:16mm 18mm}}
+@media(max-width:640px){.pad{padding:32px 24px 48px}h1{font-size:33px}.lead{font-size:17px}}
+</style>
+</head>
+<body>
+<button class="printbtn" onclick="window.print()">Save as PDF</button>
+<div class="sheet"><div class="pad">
+  <div class="lockup">
+    <span class="lockup__mark">opndoor</span>
+    <span class="lockup__bar"></span>
+    <span class="lockup__sub">Guarantee<br>Referral Portal</span>
+  </div>
+
+  <div class="gated">opndoor admin only</div>
+  <h1>Running the platform</h1>
+  <p class="lead">The internal opndoor view: reconciliation, partners and rates, the underwriter bordereau, system health, the opndoor team, and the HubSpot sync.</p>
+
+  <hr class="rule">
+
+  <h2>Reconciliation</h2>
+  <p>Agencies and branches created on the fly by referrers land in <b>Reconciliation</b> for review. For each, confirm it as a new canonical record, or (in a later release) merge a likely duplicate.</p>
+  <ul>
+    <li><b>Head-office folding</b> — a single-office agency's automatic "[Agency], Head office" branch folds into the agency card; confirming the agency confirms both. The queue counts <b>decisions</b>, not raw rows.</li>
+    <li><b>Sync nudge</b> — confirming a record fires an immediate HubSpot sync (fire-and-forget) so it appears within seconds; the couple-of-minutes cron remains the backstop.</li>
+  </ul>
+
+  <h2>Partners &amp; rate management</h2>
+  <p>Partners carry a partner commission rate and an agent commission rate. You manage these on the partner record.</p>
+  <div class="law">
+    <div class="law__label">The rate-snapshot law</div>
+    <p>Every commission, settlement, league and export figure reads the rates <b>snapshotted onto the application at creation</b> — never the partner's current rate. Editing a partner's rate changes future referrals only; it never moves history. This is deliberate and load-bearing across the money surfaces.</p>
+  </div>
+
+  <h2>The premium bordereau</h2>
+  <p>The <b>bordereau</b> export (opndoor superadmin only) is the underwriter's monthly schedule, produced verbatim to the underwriter template: grouped two-row headers (Reference / Tenant Details / Property Details / Guarantee Details), the fixed 18-column order, Landlord Name, DOB always populated, the premium rate in the header block, and the premium amount per policy (monthly rent × rate), with the template's status vocabulary.</p>
+
+  <h2>Health</h2>
+  <p>The <b>Health</b> screen is the operational status view for the platform's integrations and background jobs — the place to confirm the money and sync paths are running before you rely on them.</p>
+
+  <h2>The opndoor team</h2>
+  <p>The <b>opndoor team</b> screen manages internal opndoor staff accounts, separate from partner users. Actions taken by opndoor staff appear as "opndoor" on partner-facing screens, never as a referrer.</p>
+
+  <h2>HubSpot sync</h2>
+  <p>Confirmed agencies and branches sync one-way to HubSpot.</p>
+  <table>
+    <tr><th>Aspect</th><th>Behaviour</th></tr>
+    <tr><td>Cadence</td><td>Automatic every couple of minutes (cron), plus an immediate nudge when you confirm a record.</td></tr>
+    <tr><td>Manual</td><td>The <b>Sync HubSpot</b> button on Reconciliation runs it on demand.</td></tr>
+    <tr><td>What syncs</td><td>Applicants, companies (agencies/branches) and their associations; portal-minted companies carry their commission rate across.</td></tr>
+    <tr><td>What never syncs</td><td>HubSpot-owned finance, owner and attribution fields — a defensive filter drops them even if they ever appear in a payload. The sync never writes Contacts; tenants never become Contacts.</td></tr>
+  </table>
+
+  <div class="foot">This guide describes opndoor-internal capabilities in the shipped portal. It's a practical guide, not a finance, legal or security specification. © opndoor.</div>
+</div></div>
+</body>
+</html>
