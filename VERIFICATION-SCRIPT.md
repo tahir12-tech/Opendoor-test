@@ -359,7 +359,7 @@ Record every mismatch. Severity: **high** = wrong money/permission/data leak; **
 
 | # | Step | Expected | Actual | Severity |
 |---|---|---|---|---|
-|  |  |  |  |  |
+| 1 | §2 Help role-gating | Gated guides not reachable by lower roles | Gated Help guides are card-hidden but URL-reachable static files (`/help-docs/management-guide.html`, `/help-docs/opndoor-admin-guide.html`); auth-routed serving is a post-launch hardening item. Content is non-sensitive documentation and all permission enforcement is server-side (C2/C4/C7/C8). **Accepted** as card-gating-sufficient for v1. | low |
 |  |  |  |  |  |
 |  |  |  |  |  |
 |  |  |  |  |  |
