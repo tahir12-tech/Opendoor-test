@@ -197,12 +197,14 @@ export function buildBordereauWorkbook(dataRows: (string | number)[][], insuranc
   const COLS = ['Guarantee Reference', 'Tenant Title', 'First Name', 'Last Name', 'DOB', 'Tenant Role', 'Property Address 1', 'Property Address 2', 'City/Town', 'County', 'Postcode', 'Landlord Name', 'Issue Date', 'Tenancy date', 'Guarantee Expiry', 'Monthly Rent', 'Insurance %', 'Status'];
   const NC = COLS.length; // 18 (A–R)
   const blank = (): (string | number)[] => new Array(NC).fill('');
-  const row1 = blank(); row1[0] = `Guarantee Policy Premium Bordereau — ${monthLabel}`; row1[NC - 2] = 'Premium rate'; row1[NC - 1] = insuranceRate / 100;
+  // Verbatim to the template: bare title (the month is the sheet tab), the premium
+  // rate sits at R1 with no label, and the title bar merges A1:N1.
+  const row1 = blank(); row1[0] = 'Guarantee Policy Premium Bordereau'; row1[NC - 1] = insuranceRate / 100;
   const row2 = blank(); row2[0] = 'Reference'; row2[1] = 'Tenant Details'; row2[6] = 'Property Details'; row2[12] = 'Guarantee Details';
   const aoa: (string | number)[][] = [row1, row2, [...COLS], ...dataRows];
   const ws = XLSX.utils.aoa_to_sheet(aoa);
   ws['!merges'] = [
-    { s: { r: 0, c: 0 }, e: { r: 0, c: NC - 3 } }, // title band
+    { s: { r: 0, c: 0 }, e: { r: 0, c: NC - 5 } }, // title band A1:N1 (matches the template)
     { s: { r: 1, c: 1 }, e: { r: 1, c: 5 } },      // Tenant Details B–F
     { s: { r: 1, c: 6 }, e: { r: 1, c: 11 } },     // Property Details G–L
     { s: { r: 1, c: 12 }, e: { r: 1, c: NC - 1 } }, // Guarantee Details M–R
