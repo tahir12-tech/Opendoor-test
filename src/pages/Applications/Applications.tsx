@@ -90,7 +90,10 @@ export function Applications() {
 
   const scopeOpts = { role, scope: partnerScope, partner: partner || undefined };
   const counts = countByStatus(scopeOpts);
-  const total = counts.all;
+  // #13: the "Showing X of Y" denominator must match the active status tab.
+  // Withdrawn/Expired are terminal and excluded from counts.all, so on those tabs
+  // Y must be the tab's own count, not the operational total.
+  const total = (counts as Record<string, number>)[status] ?? counts.all;
   const visibleRows = useMemo(
     () => getApplications({ ...scopeOpts, status, agency: agency || undefined, branch: branch || undefined, q, sort }),
     // eslint-disable-next-line react-hooks/exhaustive-deps

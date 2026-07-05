@@ -184,6 +184,9 @@ function breakdownRows(list: EntityRow[], showParent: boolean): TableRow[] {
 /** Live performance export: every figure summed from the hydrated application set. */
 function buildLivePerformanceDoc(role: Role, period: Period): BrandedExport {
   const scope = scopeFor(role);
+  // #109: referrer-tier exports must strip ALL partner/agent commission lines and
+  // columns. Management/opndoor-admin exports keep them.
+  const showComm = role !== 'referrer';
   const a = liveAggregate(role, scope, period);
   const vol = liveVolume(role, scope, period);
   // Header percentages are the EFFECTIVE rate implied by the actual snapshotted
@@ -212,8 +215,12 @@ function buildLivePerformanceDoc(role: Role, period: Period): BrandedExport {
       const base = showParent
         ? [e.name, e.sub, e.refs, e.fees, e.refs, e.paid, e.deed, e.refs ? e.deed / e.refs : 0]
         : [e.name, e.refs, e.fees, e.refs, e.paid, e.deed, e.refs ? e.deed / e.refs : 0];
-      return [...base, e.partnerComm, e.agentComm] as TableRow;
+      // #109: referrer breakdown rows carry NO commission columns.
+      return (showComm ? [...base, e.partnerComm, e.agentComm] : base) as TableRow;
     });
+  // #109: breakdown columns — commission columns for non-referrers only.
+  const brkCols = (first: string, showParent: boolean, comm: [string, string]): Column[] =>
+    showComm ? LIVE_BREAKDOWN_COLS(first, showParent, comm) : BREAKDOWN_COLS(first, showParent);
 
   const blocks: BrandedDoc['blocks'] = [
     { kind: 'section', title: 'Summary' },
@@ -228,8 +235,10 @@ function buildLivePerformanceDoc(role: Role, period: Period): BrandedExport {
         { label: 'Conversion: Sent to Deed', value: a.sent ? a.deed / a.sent : 0, type: 'pct' },
         { label: 'Total guaranteed rent value', value: a.guaranteed, type: 'money' },
         { label: 'Guarantor fees collected (gross)', value: a.feesGross, type: 'money' },
-        { label: `Partner commission (${pPct}% of one month rent, net of refunds)`, value: a.partnerCommNet, type: 'money' },
-        { label: `Agent commission (${aPct}% of one month rent, net of refunds)`, value: a.agentCommNet, type: 'money' },
+        ...(showComm ? [
+          { label: `Partner commission (${pPct}% of one month rent, net of refunds)`, value: a.partnerCommNet, type: 'money' as const },
+          { label: `Agent commission (${aPct}% of one month rent, net of refunds)`, value: a.agentCommNet, type: 'money' as const },
+        ] : []),
         { label: 'Average monthly rent', value: a.avgRent, type: 'money' },
         { label: 'Average guarantor fee', value: a.paid ? a.feesGross / a.paid : 0, type: 'money' },
         { label: 'Total deeds issued', value: a.deed, type: 'int' },
@@ -244,9 +253,11 @@ function buildLivePerformanceDoc(role: Role, period: Period): BrandedExport {
         { label: 'Guarantor fees collected (gross)', value: a.feesGross, type: 'money' },
         { label: `Refunds (${a.refundCount})`, value: a.refundValue, type: 'money' },
         { label: 'Net fees after refunds', value: a.feesNet, type: 'money' },
-        { label: `Partner commission (${pPct}%, net of refunds)`, value: a.partnerCommNet, type: 'money' },
-        { label: `Agent commission (${aPct}%, net of refunds)`, value: a.agentCommNet, type: 'money' },
-        { label: 'Commission excluded on refunded fees (partner + agent)', value: a.partnerCommExcl + a.agentCommExcl, type: 'money' },
+        ...(showComm ? [
+          { label: `Partner commission (${pPct}%, net of refunds)`, value: a.partnerCommNet, type: 'money' as const },
+          { label: `Agent commission (${aPct}%, net of refunds)`, value: a.agentCommNet, type: 'money' as const },
+          { label: 'Commission excluded on refunded fees (partner + agent)', value: a.partnerCommExcl + a.agentCommExcl, type: 'money' as const },
+        ] : []),
       ],
     },
     { kind: 'blank' },
@@ -291,12 +302,12 @@ function buildLivePerformanceDoc(role: Role, period: Period): BrandedExport {
   if (role !== 'referrer') {
     blocks.push({ kind: 'section', title: 'Breakdown by agency' }, { kind: 'table', columns: LIVE_BREAKDOWN_COLS('Agency', false, NET_COMM), rows: brk(vol.agencies, false) }, { kind: 'blank' });
   }
-  blocks.push({ kind: 'section', title: 'Breakdown by branch' }, { kind: 'table', columns: LIVE_BREAKDOWN_COLS('Branch', true, NET_COMM), rows: brk(vol.branches, true) }, { kind: 'blank' });
+  blocks.push({ kind: 'section', title: 'Breakdown by branch' }, { kind: 'table', columns: brkCols('Branch', true, NET_COMM), rows: brk(vol.branches, true) }, { kind: 'blank' });
   blocks.push(
     { kind: 'section', title: role === 'referrer' ? 'Breakdown by month' : 'Breakdown by referrer' },
     // The referrer figures are commission ATTRIBUTED to the referrals they generated
     // (partner + agent share), for insight — not a payment owed to the referrer.
-    { kind: 'table', columns: LIVE_BREAKDOWN_COLS(role === 'referrer' ? 'Month' : 'Referrer', false, role === 'referrer' ? NET_COMM : ATTR_COMM), rows: brk(vol.referrers, false) },
+    { kind: 'table', columns: brkCols(role === 'referrer' ? 'Month' : 'Referrer', false, role === 'referrer' ? NET_COMM : ATTR_COMM), rows: brk(vol.referrers, false) },
     ...(role !== 'referrer' ? [{ kind: 'keyvalue' as const, items: [{ label: 'Note', value: 'Referrer commission columns are attribution (commission generated by each referrer’s referrals), not a payment to the referrer.' }] }] : []),
     { kind: 'blank' },
   );
@@ -381,6 +392,7 @@ export function buildPerformanceDoc(role: Role, period: Period): BrandedExport {
   if (liveAvailable()) return buildLivePerformanceDoc(role, period);
   const m = exportModel(role, period);
   const xrates = getRatesFor(scopeFor(role));
+  const showComm = role !== 'referrer'; // #109: referrer exports carry no commission
   const sB = bands(m.stuckSent, [0.55, 0.3]);
   const pB = bands(m.stuckPaid, [0.5, 0.33]);
 
@@ -397,8 +409,10 @@ export function buildPerformanceDoc(role: Role, period: Period): BrandedExport {
         { label: 'Conversion: Sent to Deed', value: m.sent ? m.deed / m.sent : 0, type: 'pct' },
         { label: 'Total guaranteed rent value', value: m.deed * ANNUAL, type: 'money' },
         { label: 'Guarantor fees collected', value: m.fees, type: 'money' },
-        { label: 'Partner commission (share of one month rent)', value: m.fees * xrates.partner, type: 'money' },
-        { label: 'Agent commission (share of one month rent)', value: m.fees * xrates.agent, type: 'money' },
+        ...(showComm ? [
+          { label: 'Partner commission (share of one month rent)', value: m.fees * xrates.partner, type: 'money' as const },
+          { label: 'Agent commission (share of one month rent)', value: m.fees * xrates.agent, type: 'money' as const },
+        ] : []),
         { label: 'Average monthly rent', value: AVG_RENT, type: 'money' },
         { label: 'Average guarantor fee', value: m.paid ? m.fees / m.paid : 0, type: 'money' },
         { label: 'Total deeds issued', value: m.deed, type: 'int' },

@@ -48,7 +48,7 @@ function nowRef(): Date {
 
 /** Display label for a referring user's actual role (league attribution). */
 function roleLabel(role: Role | null | undefined): string {
-  if (role === 'superadmin') return 'opndoor admin';
+  if (role === 'superadmin') return 'opndoor'; // #112: opndoor-admin actors are labelled honestly as "opndoor", never "Referrer"
   if (role === 'management') return 'Management';
   return 'Referrer';
 }

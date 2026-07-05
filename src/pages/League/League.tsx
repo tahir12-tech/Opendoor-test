@@ -19,8 +19,8 @@ import { useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import {
   ALL_PARTNERS, buildLeagueDoc, exportBranded, fmtBig, getLeague, getPartners, getPeriods, partnerName,
-  getReferrerLeague, getReferrerLeaderboardMode, setReferrerLeaderboardMode,
-  type LeaderboardMode, type LeagueRow, type LeagueView, type ReferrerBoard, type Period,
+  getReferrerLeague,
+  type LeagueRow, type LeagueView, type ReferrerBoard, type Period,
 } from '@/data';
 import { useSession } from '@/session/SessionContext';
 import { usePageMeta } from '@/components/layout/pageMeta';
@@ -30,7 +30,6 @@ import { Card, CardFoot } from '@/components/ui/Card';
 import { Eyebrow } from '@/components/ui/Eyebrow';
 import { RoleOnly } from '@/components/ui/RoleOnly';
 import { PartnerSelect, PeriodSelect } from '@/components/ui/Select';
-import { useToast } from '@/components/ui/Toast';
 import './League.css';
 
 const PAGE = 15;
@@ -49,11 +48,6 @@ const TABS: { id: LeagueView; label: string }[] = [
   { id: 'referrer', label: 'Referrers' },
 ];
 
-const MODE_LABEL: Record<LeaderboardMode, string> = {
-  full: 'Full (rankings and fees)',
-  rankings: 'Rankings only (no fees)',
-  private: 'Private (own performance only)',
-};
 
 function ConvChip({ cv }: { cv: number }) {
   const cls = cv >= 0.7 ? '' : cv >= 0.6 ? 'mid' : 'low';
@@ -192,9 +186,8 @@ function ReferrerLeagueView() {
 // ---- Full view (management / opndoor admin): unchanged tables + the #79 setting. ----
 function FullLeagueView() {
   usePageMeta('league', 'League tables', ['Home', 'League tables']);
-  const { role, partnerScope, refresh } = useSession();
+  const { role, partnerScope } = useSession();
   const [period, setPeriod] = useLeaguePeriod();
-  const toast = useToast();
   const [params] = useSearchParams();
 
   const initialView = (params.get('view') as LeagueView) || 'agency';
@@ -205,28 +198,8 @@ function FullLeagueView() {
   const [page, setPage] = useState(0);
   const [partner, setPartner] = useState('');
 
-  // #88 The referrer-leaderboard setting's canonical home is Manage partner (opndoor
-  // admin). Management cannot reach that admin-only screen, so they keep an editable
-  // control here for their own partner; opndoor admin sees a read-only value here and
-  // edits it in Manage partner. Same governed RPC + server enforcement either way.
-  const settingPartnerId = role === 'superadmin' ? partner : (partnerScope !== ALL_PARTNERS ? partnerScope : '');
-  const [mode, setMode] = useState<LeaderboardMode>('full');
-  useEffect(() => { setMode(settingPartnerId ? getReferrerLeaderboardMode(settingPartnerId) : 'full'); }, [settingPartnerId]);
-  const partnerLabel = settingPartnerId ? (getPartners().find((p) => p.id === settingPartnerId)?.name ?? 'this partner') : '';
-
-  async function changeMode(next: LeaderboardMode) {
-    if (!settingPartnerId) return;
-    const prev = mode;
-    setMode(next);
-    try {
-      await setReferrerLeaderboardMode(settingPartnerId, next);
-      await refresh();
-      toast('Referrer leaderboard visibility updated.');
-    } catch (e) {
-      setMode(prev);
-      toast(e instanceof Error ? e.message : 'Could not update the setting.');
-    }
-  }
+  // #114 Referrer-leaderboard visibility is set ONLY in Manage partner (the single
+  // lever); the in-page control has been removed from the League screen.
 
   const cols = COLS[view];
   // Show the partner tag only when genuinely viewing across partners (#52).
@@ -296,29 +269,6 @@ function FullLeagueView() {
           ))}
         </div>
       </div>
-
-      {/* #88 Management edits their own partner's mode here (they cannot reach the
-          admin-only Manage partner screen); opndoor admin sees it read-only and
-          edits it in Manage partner. */}
-      {(role === 'superadmin' || role === 'management') && settingPartnerId && (
-        <div className="lt-setting">
-          <div className="lt-setting__main">
-            <label htmlFor="rl-mode">Referrer leaderboard{partnerLabel ? ` · ${partnerLabel}` : ''}</label>
-            {role === 'management' ? (
-              <select id="rl-mode" value={mode} onChange={(e) => void changeMode(e.target.value as LeaderboardMode)}>
-                {(Object.keys(MODE_LABEL) as LeaderboardMode[]).map((m) => <option key={m} value={m}>{MODE_LABEL[m]}</option>)}
-              </select>
-            ) : (
-              <span className="lt-setting__value">{MODE_LABEL[mode]}</span>
-            )}
-          </div>
-          <span className="lt-setting__hint">
-            {role === 'management'
-              ? 'What referrers at your partner see on their own leaderboard. Commission is never shown to referrers.'
-              : 'What referrers at this partner see. Change this in Manage partner. Commission is never shown to referrers.'}
-          </span>
-        </div>
-      )}
 
       <div className="lt-toolbar">
         <div className="lt-search">

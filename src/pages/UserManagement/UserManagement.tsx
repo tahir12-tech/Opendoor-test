@@ -54,7 +54,7 @@ interface RoleOption {
 }
 const ROLE_OPTIONS: RoleOption[] = [
   { id: 'superadmin', name: 'opndoor admin (Super-admin)', desc: "opndoor's internal admin. Full control of the portal: manages agencies, branches and users, syncs with HubSpot, edits help resources, and sees every referral." },
-  { id: 'management', name: 'Management', desc: "Partner management and admin. The same screens and tools as a referrer, but across the whole partner with full visibility of all tracking and analytics. Manages the partner's own agencies, branches and team, with edits applying straight away. Cannot change portal settings." },
+  { id: 'management', name: 'Management', desc: "Partner management. The same screens and tools as a referrer, but across the whole partner with full visibility of all tracking and analytics. Manages the partner's own agencies, branches and team, with edits applying straight away. Cannot change portal settings." },
   { id: 'referrer', name: 'Referrer', desc: 'Sees and tracks only their own referrals. Can add agencies and branches on the fly while referring.' },
 ];
 
@@ -119,6 +119,7 @@ export function UserManagement() {
   const [editUser, setEditUser] = useState<ManagedUser | null>(null);
   const [editRole, setEditRole] = useState<Role>('referrer');
   const [editAudit, setEditAudit] = useState<UserAuditEntry[]>([]);
+  const [showAllUserAudit, setShowAllUserAudit] = useState(false); // #113 cap Recent changes at 6
 
   useEffect(() => {
     const close = () => setMenuOpenId(null);
@@ -479,15 +480,22 @@ export function UserManagement() {
           <div style={{ borderTop: '1px solid var(--line)', paddingTop: 14, marginTop: 14 }}>
             <div style={{ fontFamily: 'var(--display)', fontWeight: 700, fontSize: 13.5, marginBottom: 8 }}>Recent changes</div>
             {editAudit.length > 0 ? (
-              <ul className="pm-audit">
-                {editAudit.map((e, i) => (
-                  <li key={i} className="pm-audit__row">
-                    <span className="pm-audit__field">{AUDIT_LABEL[e.action] ?? e.action}</span>
-                    <span className="pm-audit__delta">{e.oldValue} → <b>{e.newValue}</b></span>
-                    <span className="pm-audit__meta">{e.actor} · {dmy(e.at)}</span>
-                  </li>
-                ))}
-              </ul>
+              <>
+                <ul className="pm-audit">
+                  {(showAllUserAudit ? editAudit : editAudit.slice(0, 6)).map((e, i) => (
+                    <li key={i} className="pm-audit__row">
+                      <span className="pm-audit__field">{AUDIT_LABEL[e.action] ?? e.action}</span>
+                      <span className="pm-audit__delta">{e.oldValue} → <b>{e.newValue}</b></span>
+                      <span className="pm-audit__meta">{e.actor} · {dmy(e.at)}</span>
+                    </li>
+                  ))}
+                </ul>
+                {editAudit.length > 6 && (
+                  <button type="button" className="pm-audit__more" onClick={() => setShowAllUserAudit((v) => !v)}>
+                    {showAllUserAudit ? 'Show fewer' : `Show all (${editAudit.length})`}
+                  </button>
+                )}
+              </>
             ) : (
               <p style={{ fontSize: 13, color: 'var(--ink-mute)', margin: 0 }}>No changes recorded yet. Role changes, deactivations and 2FA resets for this user will appear here.</p>
             )}

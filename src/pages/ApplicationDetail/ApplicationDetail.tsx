@@ -112,6 +112,7 @@ export function ApplicationDetail() {
   const [deedVersion, setDeedVersion] = useState(1);
   const [amendedDates, setAmendedDates] = useState<{ issue: string; expiry: string } | null>(null);
   const [extraActivity, setExtraActivity] = useState<Activity[]>([]);
+  const [showAllActivity, setShowAllActivity] = useState(false); // #113 cap Activity feed at 6
   const [amendOpen, setAmendOpen] = useState(false);
   const [confirmReissueOpen, setConfirmReissueOpen] = useState(false); // #82 signed-deed consequence confirm
   const [amendInput, setAmendInput] = useState('');
@@ -412,7 +413,7 @@ export function ApplicationDetail() {
     // written by the Edge Function) and refreshed by loadPayment below, so a
     // client-side entry here would double-log and could claim a phantom reissue.
     if (!SUPABASE_ENABLED) {
-      const who = role === 'superadmin' ? 'opndoor admin' : role === 'management' ? 'Management' : 'Referrer';
+      const who = role === 'superadmin' ? 'opndoor' : role === 'management' ? 'Management' : 'Referrer'; // #112
       setExtraActivity((prev) => [
         {
           color: 'var(--heliotrope)',
@@ -478,7 +479,7 @@ export function ApplicationDetail() {
       toast(err instanceof Error ? err.message : 'Could not send the deed.');
       return;
     }
-    const who = role === 'superadmin' ? 'opndoor admin' : role === 'management' ? 'Management' : 'Referrer';
+    const who = role === 'superadmin' ? 'opndoor' : role === 'management' ? 'Management' : 'Referrer'; // #112
     setExtraActivity((prev) => [
       { color: 'var(--heliotrope)', text: <>Deed of Guarantee sent to <b>{c!.name}</b> ({c!.email})</>, time: `${SUPABASE_ENABLED ? fmtStamp(new Date()) : fmtShort(NOW)} · ${who}` },
       ...prev,
@@ -603,7 +604,7 @@ export function ApplicationDetail() {
             <CardBody style={{ paddingTop: 6, paddingBottom: 6 }}>
               <div className="drow"><span className="drow__k">Monthly rent</span><span className="drow__v"><b style={{ fontFamily: 'var(--display)', fontSize: 16 }}>{d.rent}</b> per month</span></div>
               <div className="drow"><span className="drow__k">Tenancy start</span><span className="drow__v">{fmtLong(currentStart)}</span></div>
-              <div className="drow"><span className="drow__k">Referrer</span><span className="drow__v">{d.referrer}</span></div>
+              <div className="drow"><span className="drow__k">Referrer</span><span className="drow__v">{d.referrerRole === 'superadmin' ? 'opndoor' : d.referrer}</span></div>
             </CardBody>
           </Card>
 
@@ -792,7 +793,7 @@ export function ApplicationDetail() {
           <Card>
             <CardHead title="Activity" />
             <CardBody style={{ paddingTop: 8, paddingBottom: 8 }}>
-              {activity.map((a, i) => (
+              {(showAllActivity ? activity : activity.slice(0, 6)).map((a, i) => (
                 <div className="note-item" key={i}>
                   <span className="note-item__dot" style={{ background: a.color }} />
                   <div>
@@ -801,6 +802,15 @@ export function ApplicationDetail() {
                   </div>
                 </div>
               ))}
+              {activity.length > 6 && (
+                <button
+                  type="button"
+                  onClick={() => setShowAllActivity((v) => !v)}
+                  style={{ display: 'block', margin: '4px 0 2px', background: 'none', border: 'none', padding: 0, color: 'var(--heliotrope-deep, #6b3fa0)', fontWeight: 600, fontSize: 12.5, cursor: 'pointer' }}
+                >
+                  {showAllActivity ? 'Show fewer' : `Show all (${activity.length})`}
+                </button>
+              )}
             </CardBody>
           </Card>
         </div>

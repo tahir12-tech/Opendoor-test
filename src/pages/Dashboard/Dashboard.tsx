@@ -548,7 +548,7 @@ export function Dashboard() {
               <Card key={key}>
                 <CardHead
                   title={key === 'referrer' ? d.referrerTitle : key === 'branch' ? 'Volume by branch' : 'Volume by agency'}
-                  sub={`${measureLabel(measure[key])} · ${scope}`}
+                  sub={`${measureLabel(measure[key])} · ${scope} · within the selected period`}
                   actions={
                     <MeasureSelect
                       ariaLabel={`Measure for volume by ${key}`}

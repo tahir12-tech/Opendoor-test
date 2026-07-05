@@ -288,7 +288,7 @@ function notFoundDetail(ref: string): ApplicationDetail {
   return {
     ref, status: 'sent', statusLabel: '', withdrawnReason: null, name: '', initials: '', title: '', role: '', fullName: '',
     dob: '', email: '', phone: '', addr1: '', addr2: '', city: '', county: '', postcode: '',
-    agency: '', branch: '', partnerName: '', agentAddr: '', rent: '', rentNum: 0, referrer: '',
+    agency: '', branch: '', partnerName: '', agentAddr: '', rent: '', rentNum: 0, referrer: '', referrerRole: null,
     tenancyStart: '', tenancyStartDate: now, sentAt: now, paidAt: null, deedAt: null,
     sentStr: '', paidStr: null, deedStr: null, issue: null, expiry: null, annual: '',
     paymentDate: null, owner: 0, notFound: true,
@@ -379,6 +379,8 @@ export function getApplicationDetail(ref: string | null): ApplicationDetail {
     rent: `£${r.rent.toLocaleString('en-GB')}`,
     rentNum: r.rent,
     referrer: r.referrer,
+    // referrerRole is on the summary LIST (like partner), not AppRecord (#112).
+    referrerRole: LIST.find((x) => x.ref === r.ref)?.referrerRole ?? null,
     tenancyStart: fmtLong(tenancyStart),
     tenancyStartDate: tenancyStart,
     sentAt,

@@ -71,6 +71,8 @@ export function PartnerManagement() {
   const [saving, setSaving] = useState(false);
   // Pending rate change awaiting confirmation (current -> new), or null.
   const [confirm, setConfirm] = useState<{ input: PartnerSettingsInput; changes: RateChange[] } | null>(null);
+  // #114 Referrer-leaderboard change awaiting confirmation (Manage partner is the single lever).
+  const [lbConfirm, setLbConfirm] = useState<LeaderboardMode | null>(null);
 
   const partners = getPartners();
 
@@ -272,7 +274,7 @@ export function PartnerManagement() {
               What referrers at this partner see on the League Referrers tab. Commission is never shown to referrers.
             </div>
             <Field label="Visibility" htmlFor="pm-lb-mode">
-              <select id="pm-lb-mode" value={lbMode} onChange={(e) => void changeLbMode(e.target.value as LeaderboardMode)}>
+              <select id="pm-lb-mode" value={lbMode} onChange={(e) => setLbConfirm(e.target.value as LeaderboardMode)}>
                 {(Object.keys(LB_LABEL) as LeaderboardMode[]).map((m) => <option key={m} value={m}>{LB_LABEL[m]}</option>)}
               </select>
             </Field>
@@ -321,6 +323,23 @@ export function PartnerManagement() {
               <span className="pm-confirm__delta"><span className="pm-confirm__from">{c.from}</span> → <b className="pm-confirm__to">{c.to}</b></span>
             </li>
           ))}
+        </ul>
+        <p style={{ fontSize: 12.5, color: 'var(--ink-mute)', marginTop: 4 }}>This change is recorded in the partner's audit trail.</p>
+      </Modal>
+
+      <Modal
+        open={lbConfirm !== null}
+        onClose={() => setLbConfirm(null)}
+        width={460}
+        title="Change referrer leaderboard visibility?"
+        sub={`This changes what all referrers at ${name || 'this partner'} see on their leaderboard. Commission is never shown to referrers.`}
+        footer={<><Button variant="ghost" onClick={() => setLbConfirm(null)}>Back</Button><Button variant="primary" onClick={() => { const n = lbConfirm; setLbConfirm(null); if (n) void changeLbMode(n); }}>Change visibility</Button></>}
+      >
+        <ul className="pm-confirm">
+          <li className="pm-confirm__row">
+            <span className="pm-confirm__label">Visibility</span>
+            <span className="pm-confirm__delta"><span className="pm-confirm__from">{LB_LABEL[lbMode]}</span> → <b className="pm-confirm__to">{lbConfirm ? LB_LABEL[lbConfirm] : ''}</b></span>
+          </li>
         </ul>
         <p style={{ fontSize: 12.5, color: 'var(--ink-mute)', marginTop: 4 }}>This change is recorded in the partner's audit trail.</p>
       </Modal>

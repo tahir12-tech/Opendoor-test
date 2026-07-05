@@ -232,6 +232,7 @@ export async function hydrateFromSupabase(userId: string): Promise<void> {
     eventTs: eventTs(a),
     owner: ownerFlag(a),
     partner: slugOfApp(a),
+    referrerRole: emb(a.referrer)?.role ?? null,
     refunded: a.payment_state === 'refunded',
     withdrawn: a.status === 'withdrawn',
     expired: a.status === 'expired',

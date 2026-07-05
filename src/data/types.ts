@@ -131,6 +131,7 @@ export interface ApplicationSummary {
   /** 1 when the demo referrer (Priya Nair) owns this referral. */
   owner: number;
   partner: string;
+  referrerRole?: Role | null; // #112 the referring user's role, so opndoor-admin actors read "opndoor"
   /** True when the guarantor fee was refunded (status stays Paid, by design). */
   refunded?: boolean;
   /** #2 True when the application was withdrawn at Sent (terminal, pre-payment). */
@@ -170,6 +171,7 @@ export interface ApplicationDetail {
   rent: string;
   rentNum: number;
   referrer: string;
+  referrerRole?: Role | null; // #112 so opndoor-admin actors can be labelled "opndoor", not "Referrer"
   tenancyStart: string;
   tenancyStartDate: Date;
   sentAt: Date;
