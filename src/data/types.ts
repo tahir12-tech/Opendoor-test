@@ -132,6 +132,12 @@ export interface ApplicationSummary {
   owner: number;
   partner: string;
   referrerRole?: Role | null; // #112 the referring user's role, so opndoor-admin actors read "opndoor"
+  /** The referring user's display name, for the Applications referrer filter
+      (management + opndoor admin). Null when unknown. */
+  referrer?: string | null;
+  /** Sent-date epoch ms, for the Applications period filter (which buckets on the
+      sent date). Null on legacy/mock rows; callers fall back to `date`. */
+  sentAtTs?: number | null;
   /** True when the guarantor fee was refunded (status stays Paid, by design). */
   refunded?: boolean;
   /** #2 True when the application was withdrawn at Sent (terminal, pre-payment). */

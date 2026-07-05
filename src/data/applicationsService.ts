@@ -19,7 +19,11 @@ import { contactForApplication } from './orgService';
 import { SUPABASE_ENABLED, sb } from '@/lib/supabase';
 
 // Working copies. Seeded from the mock; replaced from Supabase after login.
-let LIST: ApplicationSummary[] = LIST_SEED;
+// Mock summaries carry no referrer name (only `owner`); derive it from the detail
+// records by ref so the Applications referrer filter has data in mock/demo mode.
+// Live mode replaces LIST wholesale, with referrer + sentAtTs set in hydrate.
+const REFERRER_BY_REF = new Map(RECORDS_SEED.map((r) => [r.ref, r.referrer]));
+let LIST: ApplicationSummary[] = LIST_SEED.map((s) => ({ ...s, referrer: s.referrer ?? REFERRER_BY_REF.get(s.ref) ?? null }));
 let RECORDS: AppRecord[] = RECORDS_SEED;
 
 /** Replace the applications working copies from the back end (Supabase mode). */
@@ -104,6 +108,9 @@ export interface AppScopeOpts {
   scope: PartnerScope;
   /** opndoor admin's optional in-page partner sub-filter. */
   partner?: string;
+  /** #owner Period range [start, end]; when set, status counts recount to apps
+      whose SENT date falls in it (matching the dashboard period options). */
+  periodRange?: [Date, Date];
 }
 
 export interface AppFilterOpts extends AppScopeOpts {
@@ -113,6 +120,8 @@ export interface AppFilterOpts extends AppScopeOpts {
   status?: Status | 'all' | 'refunded' | 'awaiting' | 'delivery-failed' | 'withdrawn' | 'expired';
   agency?: string;
   branch?: string;
+  /** #owner Referrer display-name filter (management + opndoor admin only). */
+  referrer?: string;
   q?: string;
   sort?: string;
 }
@@ -125,8 +134,21 @@ function scopedSet(opts: AppScopeOpts): ApplicationSummary[] {
   return set;
 }
 
+/** #owner Sent-date epoch ms for period filtering: the true sent time when
+    hydrated, else the summary's anchor-event day (mock rows have no separate
+    sent date, and are dated close to their sent date). */
+function sentTsOf(r: ApplicationSummary): number {
+  return r.sentAtTs != null ? r.sentAtTs : new Date(r.date).getTime();
+}
+function inPeriod(r: ApplicationSummary, range?: [Date, Date]): boolean {
+  if (!range) return true;
+  const ts = sentTsOf(r);
+  return ts >= range[0].getTime() && ts <= range[1].getTime();
+}
+
 export function countByStatus(opts: AppScopeOpts): { all: number; sent: number; paid: number; deed: number; refunded: number; awaiting: number; deliveryFailed: number; withdrawn: number; expired: number } {
-  const set = scopedSet(opts);
+  // #owner Chips recount within the selected period (sent-date bucketed).
+  const set = scopedSet(opts).filter((r) => inPeriod(r, opts.periodRange));
   // 'refunded' and 'awaiting' overlap 'paid' (both keep status Paid by design), so
   // they are counted in addition to paid, not instead of it. all = sent+paid+deed.
   // 'deliveryFailed' is a cross-cut of Deed (issued but no reachable agent contact).
@@ -160,6 +182,9 @@ export function getApplications(opts: AppFilterOpts): ApplicationSummary[] {
     else if (opts.status && opts.status !== 'all' && r.status !== opts.status) return false;
     if (opts.branch && r.branch !== opts.branch) return false;
     if (opts.agency && r.agency !== opts.agency) return false;
+    // #owner Referrer filter (management + opndoor admin) and period (sent-date).
+    if (opts.referrer && r.referrer !== opts.referrer) return false;
+    if (!inPeriod(r, opts.periodRange)) return false;
     if (opts.q) {
       const hay = `${r.tenant} ${r.prop} ${r.ref} ${r.ben} ${r.branch}`.toLowerCase();
       if (!hay.includes(opts.q.toLowerCase())) return false;
@@ -207,6 +232,18 @@ export function agencyNamesForScope(opts: AppScopeOpts): string[] {
   const names: string[] = [];
   rows.forEach((r) => {
     if (!names.includes(r.agency)) names.push(r.agency);
+  });
+  return names.sort();
+}
+
+/** #owner Distinct referrer names within a scope (for the applications referrer
+    filter). Management + opndoor admin surface it; referrers see only their own. */
+export function referrerNamesForScope(opts: AppScopeOpts): string[] {
+  const rows = scopedSet(opts).filter((r) => (opts.partner ? r.partner === opts.partner : true));
+  const names: string[] = [];
+  rows.forEach((r) => {
+    const n = r.referrer;
+    if (n && !names.includes(n)) names.push(n);
   });
   return names.sort();
 }

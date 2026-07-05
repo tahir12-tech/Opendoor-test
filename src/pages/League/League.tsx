@@ -16,7 +16,7 @@
    searching and paging are presentation concerns handled here.
    ===================================================================== */
 import { useEffect, useMemo, useState } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
   ALL_PARTNERS, buildLeagueDoc, exportBranded, fmtBig, getLeague, getPartners, getPeriods, partnerName,
   getReferrerLeague,
@@ -189,6 +189,7 @@ function FullLeagueView() {
   const { role, partnerScope } = useSession();
   const [period, setPeriod] = useLeaguePeriod();
   const [params] = useSearchParams();
+  const navigate = useNavigate();
 
   const initialView = (params.get('view') as LeagueView) || 'agency';
   const [view, setView] = useState<LeagueView>(COLS[initialView] ? initialView : 'agency');
@@ -312,8 +313,14 @@ function FullLeagueView() {
             <tbody>
               {pageRows.map((r, i) => {
                 const rank = start + i + 1;
+                // #owner Drill through to the matching Applications filter (management +
+                // opndoor admin view only — this table is the full view). Referrer rows
+                // link to ?referrer=, exactly as agency/branch figures drill elsewhere.
+                const drill = view === 'agency' ? `/applications?agency=${encodeURIComponent(r.name)}`
+                  : view === 'branch' ? `/applications?branch=${encodeURIComponent(r.name)}`
+                  : `/applications?referrer=${encodeURIComponent(r.name)}`;
                 return (
-                  <tr key={`${r.name}-${r.sub}`}>
+                  <tr key={`${r.name}-${r.sub}`} onClick={() => navigate(drill)} style={{ cursor: 'pointer' }} title={`View applications for ${r.name}`}>
                     <td className="num"><span className={`rank${rank <= 3 ? ' top' : ''}`}>{rank}</span></td>
                     <td><Movement m={r.movement ?? null} /></td>
                     {cols.map((c, ci) =>

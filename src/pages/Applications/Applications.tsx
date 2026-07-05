@@ -9,7 +9,7 @@ import { useEffect, useMemo, useRef, useState, type ChangeEvent, type ReactNode 
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
   agencyNamesForScope, agencyOfBranch, branchNamesForScope, countByStatus, getApplications, getPartners,
-  partnerName, ALL_PARTNERS, type Status,
+  partnerName, referrerNamesForScope, getPeriods, periodRange, ALL_PARTNERS, type Status, type Period,
 } from '@/data';
 import { useSession } from '@/session/SessionContext';
 import { usePageMeta } from '@/components/layout/pageMeta';
@@ -75,8 +75,17 @@ export function Applications() {
   const [partner, setPartner] = useState('');
   const [agency, setAgency] = useState(() => params.get('agency') || (params.get('branch') ? agencyOfBranch(params.get('branch')!) : ''));
   const [branch, setBranch] = useState(() => params.get('branch') || '');
+  // #owner Referrer filter (management + opndoor admin only). Referrers only ever
+  // see their own applications, so the filter is never offered to them and a
+  // ?referrer= they craft is ignored (scopedSet already restricts them to owner rows).
+  const [referrer, setReferrer] = useState(() => (role !== 'referrer' ? params.get('referrer') || '' : ''));
+  // #owner Period filter — the dashboard's options, bucketed on sent date. Defaults
+  // to All time so the page's default view (every application) is unchanged.
+  const periods = getPeriods();
+  const [period, setPeriod] = useState<Period>(() => periods.find((p) => p.id === 'alltime') || periods[periods.length - 1]);
+  const range = useMemo(() => periodRange(period), [period]);
 
-  // Reset partner/agency/branch when the role changes (partner isolation), skipping first run.
+  // Reset partner/agency/branch/referrer when the role changes (partner isolation), skipping first run.
   const firstRole = useRef(true);
   useEffect(() => {
     if (firstRole.current) {
@@ -86,18 +95,20 @@ export function Applications() {
     setPartner('');
     setAgency('');
     setBranch('');
+    setReferrer('');
   }, [role]);
 
   const scopeOpts = { role, scope: partnerScope, partner: partner || undefined };
-  const counts = countByStatus(scopeOpts);
+  // #owner Chips recount within the selected period.
+  const counts = countByStatus({ ...scopeOpts, periodRange: range });
   // #13: the "Showing X of Y" denominator must match the active status tab.
   // Withdrawn/Expired are terminal and excluded from counts.all, so on those tabs
   // Y must be the tab's own count, not the operational total.
   const total = (counts as Record<string, number>)[status] ?? counts.all;
   const visibleRows = useMemo(
-    () => getApplications({ ...scopeOpts, status, agency: agency || undefined, branch: branch || undefined, q, sort }),
+    () => getApplications({ ...scopeOpts, status, agency: agency || undefined, branch: branch || undefined, referrer: referrer || undefined, q, sort, periodRange: range }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [role, partnerScope, partner, status, agency, branch, q, sort],
+    [role, partnerScope, partner, status, agency, branch, referrer, q, sort, period],
   );
 
   // Pagination. Reset to the first page whenever the filtered set changes, and
@@ -105,14 +116,16 @@ export function Applications() {
   const [page, setPage] = useState(1);
   useEffect(() => {
     setPage(1);
-  }, [role, partnerScope, partner, status, agency, branch, q, sort]);
+  }, [role, partnerScope, partner, status, agency, branch, referrer, q, sort, period]);
   const pageCount = Math.max(1, Math.ceil(visibleRows.length / PAGE_SIZE));
   const safePage = Math.min(page, pageCount);
   const pagedRows = visibleRows.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE);
 
   const agencyOptions = agencyNamesForScope(scopeOpts);
   const branchOptions = branchNamesForScope(scopeOpts, agency || undefined);
+  const referrerOptions = referrerNamesForScope(scopeOpts);
   const showPartner = role === 'superadmin';
+  const showReferrer = role !== 'referrer';
 
   const tabs = [
     { id: 'all', label: 'All', count: counts.all },
@@ -148,7 +161,9 @@ export function Applications() {
     ? <>Showing applications for the <b>{branch}</b> branch{agency ? <> at <b>{agency}</b></> : null}</>
     : agency
       ? <>Showing applications for <b>{agency}</b> (all branches)</>
-      : null;
+      : referrer
+        ? <>Showing applications referred by <b>{referrer}</b></>
+        : null;
 
   return (
     <>
@@ -175,7 +190,7 @@ export function Applications() {
         <div className="active-filter">
           <Icon name="filter" className="lead" />
           <span>{activeFilter}</span>
-          <button className="active-filter__clear" onClick={() => { setAgency(''); setBranch(''); }}>
+          <button className="active-filter__clear" onClick={() => { setAgency(''); setBranch(''); setReferrer(''); }}>
             <Icon name="x" />Clear filter
           </button>
         </div>
@@ -191,9 +206,13 @@ export function Applications() {
           <input type="text" placeholder="Search by tenant, property or reference" value={q} onChange={(e) => setQ(e.target.value)} />
         </div>
         <div className="filterchips">
+          <FilterChip icon={<Icon name="calendar" />} label="Period:" display={period.label} value={period.id}
+            onChange={(e) => setPeriod(periods.find((p) => p.id === e.target.value) || period)}>
+            {periods.map((p) => <option key={p.id} value={p.id}>{p.label}</option>)}
+          </FilterChip>
           {showPartner && (
             <FilterChip icon={<Icon name="shield" />} label="Partner:" display={partner ? partnerName(partner) : (partnerScope === ALL_PARTNERS ? 'All' : partnerName(partnerScope))} value={partner}
-              onChange={(e) => { setPartner(e.target.value); setAgency(''); setBranch(''); }}>
+              onChange={(e) => { setPartner(e.target.value); setAgency(''); setBranch(''); setReferrer(''); }}>
               <option value="">All</option>
               {getPartners().map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
             </FilterChip>
@@ -208,6 +227,13 @@ export function Applications() {
             <option value="">{agency ? 'All branches' : 'All'}</option>
             {branchOptions.map((n) => <option key={n} value={n}>{n}</option>)}
           </FilterChip>
+          {showReferrer && (
+            <FilterChip icon={<Icon name="users" />} label="Referrer:" display={referrer || 'All'} value={referrer}
+              onChange={(e) => setReferrer(e.target.value)}>
+              <option value="">All</option>
+              {referrerOptions.map((n) => <option key={n} value={n}>{n}</option>)}
+            </FilterChip>
+          )}
           <FilterChip icon={<Icon name="chevronDown" />} label="Sort:" display={sort} value={sort}
             onChange={(e) => setSort(e.target.value)}>
             <option>Newest first</option>

@@ -4,7 +4,7 @@
    - Item 9: 'Refunded' is a status chip that cross-cuts Paid; counts stay honest
      (All = Sent + Paid + Deed; Refunded counted separately). */
 import { beforeEach, describe, expect, it } from 'vitest';
-import { ALL_PARTNERS, countByStatus, getApplications, getApplicationDetail, hydrateApplications } from '@/data';
+import { ALL_PARTNERS, countByStatus, getApplications, getApplicationDetail, hydrateApplications, referrerNamesForScope } from '@/data';
 import type { ApplicationSummary } from '@/data';
 import type { AppRecord } from '@/data/mock/applications';
 
@@ -38,6 +38,43 @@ describe('countByStatus + refunded chip (item 9)', () => {
 
   it('the Paid filter still includes refunded rows (status is Paid)', () => {
     expect(getApplications({ ...opts, status: 'paid' })).toHaveLength(3);
+  });
+});
+
+describe('referrer filter + period recount (owner addition)', () => {
+  const T = (y: number, m: number, d: number) => new Date(y, m - 1, d).getTime();
+  function sumRP(ref: string, status: ApplicationSummary['status'], referrer: string | null, sentAtTs?: number, date = '2026-06-01'): ApplicationSummary {
+    return { ref, tenant: `T ${ref}`, prop: '1 St', branch: 'B', agency: 'A', ben: '', rent: 1000, status, date, owner: 1, partner: 'rightmove', referrer, sentAtTs };
+  }
+  const ROWS: ApplicationSummary[] = [
+    sumRP('GR-A', 'sent', 'Alice', T(2026, 6, 10)),
+    sumRP('GR-B', 'paid', 'Alice', T(2026, 5, 15)),   // May — out of a June window
+    sumRP('GR-C', 'deed', 'Bob', T(2026, 6, 20)),
+    sumRP('GR-D', 'paid', null, undefined, '2026-06-01'), // no sentAtTs -> falls back to `date`
+  ];
+  const june: [Date, Date] = [new Date(2026, 5, 1, 0, 0, 0, 0), new Date(2026, 5, 30, 23, 59, 59, 999)];
+  beforeEach(() => hydrateApplications(ROWS, []));
+
+  it('referrerNamesForScope lists distinct referrers, sorted, excluding unknowns', () => {
+    expect(referrerNamesForScope(opts)).toEqual(['Alice', 'Bob']); // null referrer omitted
+  });
+
+  it('the referrer filter returns only that referrer\'s rows', () => {
+    expect(getApplications({ ...opts, referrer: 'Alice' }).map((r) => r.ref).sort()).toEqual(['GR-A', 'GR-B']);
+  });
+
+  it('the period filter buckets on sent date, falling back to `date` when unset', () => {
+    const rows = getApplications({ ...opts, periodRange: june }).map((r) => r.ref).sort();
+    expect(rows).toEqual(['GR-A', 'GR-C', 'GR-D']); // GR-B (May) excluded; GR-D via date fallback
+  });
+
+  it('status chips recount within the selected period', () => {
+    const c = countByStatus({ ...opts, periodRange: june });
+    expect(c).toMatchObject({ all: 3, sent: 1, paid: 1, deed: 1 }); // GR-B dropped from the May bucket
+  });
+
+  it('referrer and period compose (Alice, in June = GR-A only)', () => {
+    expect(getApplications({ ...opts, referrer: 'Alice', periodRange: june }).map((r) => r.ref)).toEqual(['GR-A']);
   });
 });
 

@@ -233,6 +233,9 @@ export async function hydrateFromSupabase(userId: string): Promise<void> {
     owner: ownerFlag(a),
     partner: slugOfApp(a),
     referrerRole: emb(a.referrer)?.role ?? null,
+    // #owner referrer name + sent-date for the Applications referrer/period filters.
+    referrer: a.referrer_name ?? emb(a.referrer)?.full_name ?? null,
+    sentAtTs: a.sent_at ? new Date(a.sent_at).getTime() : null,
     refunded: a.payment_state === 'refunded',
     withdrawn: a.status === 'withdrawn',
     expired: a.status === 'expired',
