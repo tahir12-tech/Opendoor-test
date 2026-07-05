@@ -3,8 +3,9 @@
    The real queue of agencies/branches created on the fly by referrers
    (review_state = pending_review), each with its parent, creator, created-at,
    attached referral count, and a same/similar-name hint against confirmed
-   records. "Confirm as new" promotes it to confirmed (audited). Merge and
-   HubSpot sync are not built yet.
+   records. "Confirm as new" promotes it to confirmed (audited). HubSpot sync runs
+   on a 2-minute cron and on demand via triggerHubspotSync (the Sync button);
+   merge is not built yet.
 
    Live mode uses the reconciliation_queue / confirm_org_entity RPCs; the badge
    count is derived synchronously from the hydrated org (pending entities).
@@ -87,6 +88,17 @@ export async function confirmReconEntity(type: 'agency' | 'branch', entityId: st
     const bi = MOCK_QUEUE.findIndex((r) => r.type === 'branch' && r.parent === row.name && r.name.toLowerCase() === ho);
     if (bi >= 0) MOCK_QUEUE.splice(bi, 1);
   }
+}
+
+/** Trigger an on-demand HubSpot sync (admin only). Fire-and-forget: the edge
+    function runs asynchronously; a 2-minute cron also runs it automatically. */
+export async function triggerHubspotSync(): Promise<void> {
+  if (SUPABASE_ENABLED) {
+    const { error } = await sb().rpc('trigger_hubspot_sync');
+    if (error) throw new Error(error.message);
+    return;
+  }
+  // Mock mode: no backend to call.
 }
 
 /** Pending count for the sidebar badge. Derived synchronously from the hydrated

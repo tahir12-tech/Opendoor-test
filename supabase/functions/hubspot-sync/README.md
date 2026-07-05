@@ -104,13 +104,22 @@ missing edge is never lost to a coarse per-event ledger.
 - **Failures** — `report_ops_incident('hubspot_sync_error', …)` (existing ops-alert channel); the cursor
   holds at the last success so the batch retries next run.
 
+## Triggers
+
+- **Cron — every 2 minutes** (`pg_cron` job `hubspot-sync`, `*/2 * * * *`): the baseline. Mirrors the
+  other reminder crons (`net.http_post` + the `reminders_cron` secret). Near-real-time for the trial.
+- **On-demand — the Reconciliation screen's "Sync HubSpot" button**: calls the admin-gated RPC
+  `trigger_hubspot_sync()` (SECURITY DEFINER, `is_admin()` = superadmin, same gate as the Confirm
+  action), which fires the function via `pg_net`. Handy right after confirming an org so its RFL company
+  and associations appear immediately.
+
 ## Auth & invocation
 
 `verify_jwt = false`. Auth: `x-ops-secret` matched against `REMINDERS_CRON_SECRET` (edge env) OR the
 `ops_secrets` `reminders_cron` mirror — identical to `ops-alert` / the reminder crons. Token resolution:
 `HUBSPOT_ACCESS_TOKEN` (edge env) → `x-hubspot-token` header → `ops_secrets` `hubspot_access_token`.
 
-Invoke like a cron (secret never leaves the DB):
+Both triggers invoke it the same way (secret never leaves the DB):
 
 ```sql
 select net.http_post(

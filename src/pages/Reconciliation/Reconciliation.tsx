@@ -4,11 +4,11 @@
    (review_state = pending_review), each with its parent, creator, created-at,
    attached referral count, and a same/similar-name hint against confirmed
    records. "Confirm as new" promotes it to a confirmed canonical record
-   (audited). Merge and HubSpot sync are not built yet: Merge is disabled with a
-   note, and the Sync button is inert.
+   (audited). The Sync button pushes confirmed records to HubSpot on demand (a
+   2-minute cron also runs the sync). Merge is not built yet (disabled).
    ===================================================================== */
 import { useCallback, useEffect, useState } from 'react';
-import { confirmReconEntity, loadReconciliationQueue, type ReconRow } from '@/data';
+import { confirmReconEntity, loadReconciliationQueue, triggerHubspotSync, type ReconRow } from '@/data';
 import { useSession } from '@/session/SessionContext';
 import { usePageMeta } from '@/components/layout/pageMeta';
 import { Button } from '@/components/ui/Button';
@@ -27,6 +27,7 @@ export function Reconciliation() {
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<Filter>('all');
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [syncing, setSyncing] = useState(false);
 
   const reload = useCallback(async () => {
     try {
@@ -70,16 +71,29 @@ export function Reconciliation() {
     }
   }
 
+  async function syncNow() {
+    if (syncing) return;
+    setSyncing(true);
+    try {
+      await triggerHubspotSync();
+      toast('HubSpot sync started — confirmed records update within ~2 minutes.');
+    } catch (e) {
+      toast(e instanceof Error ? e.message : 'Could not start the HubSpot sync.');
+    } finally {
+      setSyncing(false);
+    }
+  }
+
   return (
     <>
       <div className="page-head">
         <div>
           <div className="rec-eyebrow"><span className="opx">opndoor</span> · internal admin</div>
           <h1 className="page-head__title" style={{ marginTop: 10 }}>Reconciliation</h1>
-          <p className="page-head__sub">Agencies and branches created on the fly by referrers, awaiting review. Confirm new canonical records; merging likely duplicates and HubSpot sync are coming in a later release.</p>
+          <p className="page-head__sub">Agencies and branches created on the fly by referrers, awaiting review. Confirm new canonical records — confirmed agencies and branches sync to HubSpot automatically every couple of minutes (or use Sync HubSpot to run it now). Merging likely duplicates is coming in a later release.</p>
         </div>
         <div className="page-head__actions">
-          <Button variant="ghost" size="sm" disabled title="HubSpot sync is coming in a later release."><Icon name="refresh" /> Sync HubSpot</Button>
+          <Button variant="ghost" size="sm" disabled={syncing} onClick={syncNow} title="Push confirmed records to HubSpot now (also runs automatically every 2 minutes)."><Icon name="refresh" /> {syncing ? 'Syncing…' : 'Sync HubSpot'}</Button>
         </div>
       </div>
 
