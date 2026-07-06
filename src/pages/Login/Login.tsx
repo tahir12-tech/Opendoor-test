@@ -28,7 +28,7 @@ export function Login() {
   const navigate = useNavigate();
   const { status, markMfaVerified } = useSession();
   const [step, setStep] = useState<Step>('creds');
-  const [email, setEmail] = useState('priya.nair@brackenhouse.co.uk');
+  const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [masked, setMasked] = useState('');
   const [codes, setCodes] = useState<string[]>(['', '', '', '', '', '']);
@@ -190,6 +190,7 @@ export function Login() {
               <span className="n">2</span><span>Verify</span>
             </div>
           </div>
+
 
           {step === 'creds' ? (
             <div>
