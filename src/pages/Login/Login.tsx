@@ -199,7 +199,7 @@ export function Login() {
               <form className="auth__form" onSubmit={submitCreds} noValidate>
                 <div className="field">
                   <label htmlFor="email">Work email</label>
-                  <input id="email" type="email" placeholder="you@brackenhouse.co.uk" autoComplete="email" value={email} onChange={(e) => setEmail(e.target.value)} required />
+                  <input id="email" type="email" placeholder="you@brackenhouse.co.uk" autoComplete="off" value={email} onChange={(e) => setEmail(e.target.value)} required />
                 </div>
                 <div className="field">
                   <label htmlFor="pass">Password</label>
