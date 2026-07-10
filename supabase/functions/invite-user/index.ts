@@ -117,8 +117,8 @@ Deno.serve(async (req) => {
     // is the inviter, drop it and let the template say "Your team".
     const inviterName = caller.full_name && !caller.full_name.includes("@") ? caller.full_name : "";
     const tpl = inviteEmailTemplate({ link, intendedFor: email, firstName, inviterName, partnerName });
-    const emailRes = await sendEmail({ subject: tpl.subject, html: tpl.html });
-
+    // const emailRes = await sendEmail({ subject: tpl.subject, html: tpl.html });
+    const emailRes = await sendEmail({ subject: tpl.subject, html: tpl.html, to: email });
     // Audit the invite (best-effort).
     if (targetUserId) {
       await service.from("user_audit").insert({
