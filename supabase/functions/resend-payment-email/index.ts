@@ -71,7 +71,7 @@ Deno.serve(async (req) => {
       payUrl,
       intendedFor: app.tenant_email,
     });
-    const emailRes = await sendEmail({ subject: tpl.subject, html: tpl.html });
+   const emailRes = await sendEmail({ subject: tpl.subject, html: tpl.html, to: app.tenant_email });
     // Partner-safe business message; test-mode redirect target stays admin-only.
     await service.from("activity_log").insert({
       application_id: app.id,

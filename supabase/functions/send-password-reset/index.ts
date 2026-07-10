@@ -50,7 +50,7 @@ Deno.serve(async (req) => {
       const link = data?.properties?.action_link as string | undefined;
       if (!error && link) {
         const tpl = passwordResetTemplate({ link, intendedFor: email });
-        await sendEmail({ subject: tpl.subject, html: tpl.html });
+        await sendEmail({ subject: tpl.subject, html: tpl.html, to: email });
       }
     }
     return json({ ok: true });

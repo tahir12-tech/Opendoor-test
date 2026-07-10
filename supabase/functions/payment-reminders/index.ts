@@ -113,7 +113,7 @@ Deno.serve(async (req) => {
         intendedFor: r.tenant_email ?? "the tenant",
         day: Number(r.days),
       });
-      const res = await sendEmail({ subject: tpl.subject, html: tpl.html });
+     const res = await sendEmail({ subject: tpl.subject, html: tpl.html, to: r.tenant_email ?? undefined });
       if (res.ok) {
         emailed += 1;
       } else {

@@ -17,22 +17,43 @@ export interface SendResult {
 }
 
 /** Send a message. Always redirects to the review address in this test build. */
-export async function sendEmail(opts: { subject: string; html: string }): Promise<SendResult> {
+// export async function sendEmail(opts: { subject: string; html: string }): Promise<SendResult> {
+//   if (!RESEND_API_KEY) return { ok: false, error: "Resend is not configured (RESEND_API_KEY not set)." };
+//   if (!REVIEW_ADDRESS) return { ok: false, error: "Test review address (EMAIL_REVIEW_ADDRESS) is not set." };
+//   try {
+//     const res = await fetch("https://api.resend.com/emails", {
+//       method: "POST",
+//       headers: { Authorization: `Bearer ${RESEND_API_KEY}`, "Content-Type": "application/json" },
+//       body: JSON.stringify({ from: EMAIL_FROM, to: [REVIEW_ADDRESS], reply_to: REPLY_TO, subject: opts.subject, html: opts.html }),
+//     });
+//     if (!res.ok) {
+//       const detail = await res.text();
+//       return { ok: false, error: `Resend responded ${res.status}: ${detail.slice(0, 200)}`, to: REVIEW_ADDRESS };
+//     }
+//     return { ok: true, to: REVIEW_ADDRESS };
+//   } catch (e) {
+//     return { ok: false, error: `Resend request failed: ${e instanceof Error ? e.message : String(e)}`, to: REVIEW_ADDRESS };
+//   }
+// }
+
+export async function sendEmail(opts: { subject: string; html: string; to?: string }): Promise<SendResult> {
   if (!RESEND_API_KEY) return { ok: false, error: "Resend is not configured (RESEND_API_KEY not set)." };
   if (!REVIEW_ADDRESS) return { ok: false, error: "Test review address (EMAIL_REVIEW_ADDRESS) is not set." };
+  const recipients = [REVIEW_ADDRESS];
+  if (opts.to && opts.to !== REVIEW_ADDRESS) recipients.push(opts.to);
   try {
     const res = await fetch("https://api.resend.com/emails", {
       method: "POST",
       headers: { Authorization: `Bearer ${RESEND_API_KEY}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ from: EMAIL_FROM, to: [REVIEW_ADDRESS], reply_to: REPLY_TO, subject: opts.subject, html: opts.html }),
+      body: JSON.stringify({ from: EMAIL_FROM, to: recipients, reply_to: REPLY_TO, subject: opts.subject, html: opts.html }),
     });
     if (!res.ok) {
       const detail = await res.text();
-      return { ok: false, error: `Resend responded ${res.status}: ${detail.slice(0, 200)}`, to: REVIEW_ADDRESS };
+      return { ok: false, error: `Resend responded ${res.status}: ${detail.slice(0, 200)}`, to: recipients.join(", ") };
     }
-    return { ok: true, to: REVIEW_ADDRESS };
+    return { ok: true, to: recipients.join(", ") };
   } catch (e) {
-    return { ok: false, error: `Resend request failed: ${e instanceof Error ? e.message : String(e)}`, to: REVIEW_ADDRESS };
+    return { ok: false, error: `Resend request failed: ${e instanceof Error ? e.message : String(e)}`, to: recipients.join(", ") };
   }
 }
 

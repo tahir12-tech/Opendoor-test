@@ -129,7 +129,7 @@ Deno.serve(async (req) => {
         guaranteeRef: r.guarantee_ref, prop: r.prop ?? "", agency: r.agency ?? "", branch: r.branch ?? "",
         daysUntil: r.days, expiryDmy: dmy(r.expiry_date), intendedFor: recipients.join(", ") || "the owning referrer and partner management",
       });
-      const res = await sendEmail({ subject: tpl.subject, html: tpl.html });
+      const res = await sendEmail({ subject: tpl.subject, html: tpl.html, to: recipients.join(", ") || undefined });
       if (res.ok) {
         emailed += 1;
       } else {
