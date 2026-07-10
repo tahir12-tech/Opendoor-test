@@ -5,7 +5,7 @@
 // banner), plus inviteEmailTemplate wrapping the branded layout().
 // =====================================================================
 const RESEND_API_KEY = Deno.env.get("RESEND_API_KEY");
-const EMAIL_FROM = Deno.env.get("EMAIL_FROM") ?? "opndoor <payments@opndoor.co>";
+const EMAIL_FROM = Deno.env.get("EMAIL_FROM") ?? "opndoor <onboarding@resend.dev>";
 const REPLY_TO = Deno.env.get("EMAIL_REPLY_TO") ?? "hello@opndoor.co";
 const REVIEW_ADDRESS = Deno.env.get("EMAIL_REVIEW_ADDRESS");
 
