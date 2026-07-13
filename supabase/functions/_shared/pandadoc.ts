@@ -100,8 +100,8 @@ export async function createAndSend(a: DeedApp): Promise<DeedResult> {
       body: JSON.stringify({
         name: `Deed of Guarantee - ${a.guarantee_ref}`,
         template_uuid: TEMPLATE_ID,
-        // Sandbox: route the tenant recipient to the review address.
-        recipients: [{ email: REVIEW || a.tenant_email, first_name: a.tenant_first_name, last_name: a.tenant_last_name, role: "Tenant" }],
+        // Sandbox: route the tenant recipient to the review address. i have chnaged it redirct to tenat
+       recipients: [{ email: a.tenant_email, first_name: a.tenant_first_name, last_name: a.tenant_last_name, role: "Tenant" }],
         tokens: tokens(a, issue.dmy),
         metadata: { application_id: a.id, guarantee_ref: a.guarantee_ref },
       }),
@@ -138,7 +138,28 @@ export async function createAndSend(a: DeedApp): Promise<DeedResult> {
       headers: headers(),
       body: JSON.stringify({ silent: false, subject, message }),
     });
-    if (!sendRes.ok) return { ok: false, documentId: docId, error: `PandaDoc send ${sendRes.status}: ${(await sendRes.text()).slice(0, 300)}` };
+   if (!sendRes.ok) return { ok: false, documentId: docId, error: `PandaDoc send ${sendRes.status}: ${(await sendRes.text()).slice(0, 300)}` };
+
+    // Also notify the review address (PandaDoc's own email only reaches the
+    // real recipient; this is a separate FYI copy via Resend).
+    if (REVIEW && RESEND_API_KEY) {
+      const reviewHtml = `<!doctype html><html><body style="margin:0;padding:0;background:#f6f3fa;">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f6f3fa;padding:28px 0;"><tr><td align="center">
+          <table role="presentation" width="560" cellpadding="0" cellspacing="0" style="width:560px;max-width:92%;background:#fff;border-radius:16px;overflow:hidden;">
+            <tr><td style="background:#271d5f;padding:22px 28px;"><span style="font:800 22px 'Sora',system-ui,-apple-system,'Segoe UI',Roboto,Arial,sans-serif;color:#fff;">opndoor</span></td></tr>
+            <tr><td style="padding:10px 16px;background:#f8eff9;font:600 12px 'Manrope',system-ui,-apple-system,'Segoe UI',Roboto,Arial,sans-serif;color:#5b4d86;">Review copy. The deed-signing email was sent to ${a.tenant_email}.</td></tr>
+            <tr><td style="padding:28px;font:400 15px/1.6 'Manrope',system-ui,-apple-system,'Segoe UI',Roboto,Arial,sans-serif;color:#271d5f;">
+              <p style="margin:0 0 14px;">${message}</p>
+            </td></tr>
+          </table>
+        </td></tr></table></body></html>`;
+      await fetch("https://api.resend.com/emails", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${RESEND_API_KEY}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ from: EMAIL_FROM, to: [REVIEW], reply_to: REPLY_TO, subject: `[Review copy] ${subject}`, html: reviewHtml }),
+      }).catch(() => {});
+    }
+
     return { ok: true, documentId: docId, issueDateIso: issue.iso };
   } catch (e) {
     return { ok: false, error: `PandaDoc request failed: ${e instanceof Error ? e.message : String(e)}` };
@@ -243,7 +264,7 @@ async function signingLink(documentId: string, recipientEmail: string): Promise<
 /** Email the tenant the signing link (redirected to the review address in sandbox). */
 async function emailSigningLink(tenantEmail: string, link: string, ctx: RemindContext): Promise<{ ok: boolean; error?: string }> {
   if (!RESEND_API_KEY) return { ok: false, error: "Resend is not configured, so the signing link could not be emailed." };
-  const dest = REVIEW || tenantEmail;
+ const recipients = REVIEW ? [tenantEmail, REVIEW] : [tenantEmail];
   const subject = `Your opndoor Deed of Guarantee is ready to sign, ${ctx.guarantee_ref}`;
   const banner = REVIEW
     ? `<tr><td style="padding:10px 16px;background:#f8eff9;border-bottom:1px solid rgba(39,29,95,0.1);font:600 12px 'Manrope',system-ui,-apple-system,'Segoe UI',Roboto,Arial,sans-serif;color:#5b4d86;">Test mode. This email was intended for ${tenantEmail} and redirected to you for review.</td></tr>`
@@ -268,7 +289,7 @@ async function emailSigningLink(tenantEmail: string, link: string, ctx: RemindCo
     const res = await fetch("https://api.resend.com/emails", {
       method: "POST",
       headers: { Authorization: `Bearer ${RESEND_API_KEY}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ from: EMAIL_FROM, to: [dest], reply_to: REPLY_TO, subject, html }),
+      body: JSON.stringify({ from: EMAIL_FROM, to: recipients, reply_to: REPLY_TO, subject, html }),
     });
     if (!res.ok) return { ok: false, error: `Resend responded ${res.status}: ${(await res.text()).slice(0, 150)}` };
     return { ok: true };
