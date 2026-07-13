@@ -47,11 +47,23 @@ Deno.serve(async (req) => {
         email,
         options: { redirectTo: `${base}/reset-password` },
       });
+      console.log("RESET LINK RESULT", {
+        email,
+        error,
+        hasLink: !!data?.properties?.action_link
+      });
       const link = data?.properties?.action_link as string | undefined;
       if (!error && link) {
         const tpl = passwordResetTemplate({ link, intendedFor: email });
-        await sendEmail({ subject: tpl.subject, html: tpl.html, to: email });
+        const result = await sendEmail({
+          subject: tpl.subject,
+          html: tpl.html,
+          to: email,
+        });
+
+console.log("EMAIL RESULT", result);
       }
+
     }
     return json({ ok: true });
   } catch (e) {
