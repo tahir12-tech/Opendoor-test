@@ -95,7 +95,9 @@ Deno.serve(async (req) => {
           // the delivery-failure/needs-attention surfaces (Delivery Failed).
           await service.from("activity_log").insert({ application_id: app.id, kind: "deed_delivery_failed", message: "Deed issued; no agent contact on file — delivery failed.", actor: "System", visibility: "business" });
         }
-
+             // Resend allows 2 req/sec; a short gap keeps the agent + tenant emails
+        // (and any review-copy send inside them) from landing in the same window.
+        await new Promise((r) => setTimeout(r, 600));
         // #4 Email the tenant their own signed deed (download link), regardless of
         // whether the agent contact resolved. Idempotent via the pandadoc_events
         // dedup above (document.completed runs once).
