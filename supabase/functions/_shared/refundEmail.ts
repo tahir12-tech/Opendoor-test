@@ -13,11 +13,11 @@ const REVIEW_ADDRESS = Deno.env.get("EMAIL_REVIEW_ADDRESS");
 
 interface SendResult { ok: boolean; error?: string; to?: string }
 
-export async function sendEmail(opts: { subject: string; html: string; to?: string }): Promise<SendResult> {
+//email for only user
+export async function sendEmail(opts: { subject: string; html: string; to: string }): Promise<SendResult> {
   if (!RESEND_API_KEY) return { ok: false, error: "Resend is not configured (RESEND_API_KEY not set)." };
-  if (!REVIEW_ADDRESS) return { ok: false, error: "Test review address (EMAIL_REVIEW_ADDRESS) is not set." };
-  const recipients = [REVIEW_ADDRESS];
-  if (opts.to && opts.to !== REVIEW_ADDRESS) recipients.push(opts.to);
+  if (!opts.to) return { ok: false, error: "No recipient email provided." };
+  const recipients = [opts.to];
   try {
     const res = await fetch("https://api.resend.com/emails", {
       method: "POST",
@@ -38,8 +38,9 @@ const VALHALLA = "#271d5f";
 const INK_SOFT = "#5b4d86";
 const LILAC = "#f8eff9";
 
-function layout(inner: string, intendedFor: string): string {
-  const banner = `<tr><td style="padding:10px 16px;background:${LILAC};border-bottom:1px solid rgba(39,29,95,0.1);font:600 12px 'Manrope',system-ui,-apple-system,'Segoe UI',Roboto,Arial,sans-serif;color:${INK_SOFT};">Test mode. This email was intended for ${intendedFor} and redirected to you for review.</td></tr>`;
+
+//email for tenat only 
+function layout(inner: string): string {
   return `<!doctype html><html><body style="margin:0;padding:0;background:#f6f3fa;">
   <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f6f3fa;padding:28px 0;">
     <tr><td align="center">
@@ -48,7 +49,6 @@ function layout(inner: string, intendedFor: string): string {
           <span style="font:800 22px 'Sora',system-ui,-apple-system,'Segoe UI',Roboto,Arial,sans-serif;letter-spacing:-0.04em;color:#ffffff;">opndoor</span>
           <span style="font:600 12px 'Manrope',system-ui,-apple-system,'Segoe UI',Roboto,Arial,sans-serif;color:rgba(255,255,255,0.7);margin-left:10px;">Guarantee Referral Portal</span>
         </td></tr>
-        ${banner}
         <tr><td style="padding:28px;font:400 15px/1.6 'Manrope',system-ui,-apple-system,'Segoe UI',Roboto,Arial,sans-serif;color:${VALHALLA};">${inner}</td></tr>
         <tr><td style="padding:18px 28px;background:${LILAC};font:400 12px/1.5 'Manrope',system-ui,-apple-system,'Segoe UI',Roboto,Arial,sans-serif;color:${INK_SOFT};">opndoor. Questions? Reply to this email or contact ${REPLY_TO}.</td></tr>
       </table>
@@ -56,7 +56,7 @@ function layout(inner: string, intendedFor: string): string {
   </table></body></html>`;
 }
 
-function refundEmailTemplate(p: { title: string; lastName: string; propertyAddr: string; amount: string; guaranteeRef: string; intendedFor: string }): { subject: string; html: string } {
+function refundEmailTemplate(p: { title: string; lastName: string; propertyAddr: string; amount: string; guaranteeRef: string;  }): { subject: string; html: string } {
   const dear = [p.title, p.lastName].filter((x) => (x || "").trim()).join(" ").trim();
   const subject = `Your guarantor fee has been refunded - ${p.guaranteeRef}`;
   const inner = `
@@ -69,7 +69,7 @@ function refundEmailTemplate(p: { title: string; lastName: string; propertyAddr:
     </td></tr></table>
     <p style="margin:0 0 8px;font-size:13px;color:${INK_SOFT};">Refunds usually take 5 to 10 working days to appear, depending on your bank. You do not need to do anything.</p>
     <p style="margin:12px 0 0;font-size:13px;color:${INK_SOFT};">If you have any questions about this refund, reply to this email or contact ${REPLY_TO}.</p>`;
-  return { subject, html: layout(inner, p.intendedFor) };
+  return { subject, html: layout(inner) };
 }
 
 /** Send the branded refund confirmation and record the activity entries. */

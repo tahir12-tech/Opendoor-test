@@ -236,8 +236,8 @@ export async function remindSignature(documentId: string, ctx: RemindContext): P
   }
 
   // Fallback: mint a fresh signing-session link and email it ourselves.
-  const link = await signingLink(documentId, recipientEmail);
-  if (!link) return { ok: false, error: "Reminder could not be sent, please try again shortly.", technical: "Could not create a PandaDoc signing session for the tenant." };
+  const { link, detail } = await signingLink(documentId, recipientEmail);
+  if (!link) return { ok: false, error: "Reminder could not be sent, please try again shortly.", technical: detail ?? "Could not create a PandaDoc signing session for the tenant." };
   const em = await emailSigningLink(recipientEmail, link, ctx);
   // Email fallback unavailable (e.g. unverified Resend domain): honest copy for
   // partners; the raw provider error is returned for admin-only logging.
