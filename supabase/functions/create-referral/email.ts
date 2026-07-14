@@ -10,7 +10,7 @@
 const RESEND_API_KEY = Deno.env.get("RESEND_API_KEY");
 const EMAIL_FROM = Deno.env.get("EMAIL_FROM") ?? "opndoor <payments@opndoor.co>";
 const REPLY_TO = Deno.env.get("EMAIL_REPLY_TO") ?? "hello@opndoor.co";
-const REVIEW_ADDRESS = Deno.env.get("EMAIL_REVIEW_ADDRESS");
+// const REVIEW_ADDRESS = Deno.env.get("EMAIL_REVIEW_ADDRESS");
 
 export interface SendResult {
   ok: boolean;
@@ -159,5 +159,5 @@ export function paymentEmailTemplate(p: {
     <p style="margin:0 0 8px;font-size:13px;color:${INK_SOFT};">It's a one-off payment for opndoor to act as your professional guarantor, providing a Deed of Guarantee in favour of the property so your tenancy can proceed. Payment is secure and handled by Stripe.</p>
     <p style="margin:14px 0 0;font-size:12px;color:${INK_SOFT};">No longer need this? <a href="${p.payUrl}" style="color:${HELIOTROPE_DEEP};">Let us know</a> and we'll close it off. No payment will be taken.</p>
     <p style="margin:14px 0 0;font-size:12px;color:${INK_SOFT};">If the button does not work, copy this link into your browser:<br><span style="color:${HELIOTROPE_DEEP};word-break:break-all;">${p.payUrl}</span></p>`;
-  return { subject, html: layout(subject) };
+  return { subject, html: layout(inner) };
 }
