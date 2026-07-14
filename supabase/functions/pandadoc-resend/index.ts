@@ -39,7 +39,7 @@ Deno.serve(async (req) => {
 
     const { data: app, error } = await userClient
       .from("applications")
-      .select("id, status, deed_state, pandadoc_document_id, guarantee_ref, tenant_first_name, tenant_last_name")
+      .select("id, status, deed_state, pandadoc_document_id, guarantee_ref, tenant_first_name, tenant_last_name,tenant_email")
       .eq("guarantee_ref", ref)
       .maybeSingle();
     if (error) return json({ ok: false, error: error.message }, 400);
@@ -53,6 +53,7 @@ Deno.serve(async (req) => {
         guarantee_ref: app.guarantee_ref,
         tenant_first_name: app.tenant_first_name,
         tenant_last_name: app.tenant_last_name,
+        tenant_email: app.tenant_email,
       });
       if (!result.ok) {
         // Honest, partner-safe entry for everyone; the raw provider detail is
