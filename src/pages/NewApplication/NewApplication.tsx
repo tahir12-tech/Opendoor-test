@@ -85,12 +85,12 @@ export function NewApplication() {
   const err = (k: keyof ReferralValues) => ((submitted || touched.has(k)) ? errors[k] : undefined);
 
   // Native date-input bounds (dd/mm/yyyy display in en-GB; value is yyyy-mm-dd).
-  const isoOf = (dd: Date) => `${dd.getFullYear()}-${String(dd.getMonth() + 1).padStart(2, '0')}-${String(dd.getDate()).padStart(2, '0')}`;
-  const nowD = new Date();
-  const dobMax = isoOf(nowD);
-  const dobMin = isoOf(new Date(nowD.getFullYear() - 100, nowD.getMonth(), nowD.getDate()));
-  const startMin = isoOf(new Date(nowD.getFullYear(), nowD.getMonth(), nowD.getDate() - 7));
-  const startMax = isoOf(new Date(nowD.getFullYear() + 2, nowD.getMonth(), nowD.getDate()));
+  // const isoOf = (dd: Date) => `${dd.getFullYear()}-${String(dd.getMonth() + 1).padStart(2, '0')}-${String(dd.getDate()).padStart(2, '0')}`;
+  // const nowD = new Date();
+  // const dobMax = isoOf(nowD);
+  // const dobMin = isoOf(new Date(nowD.getFullYear() - 100, nowD.getMonth(), nowD.getDate()));
+  // const startMin = isoOf(new Date(nowD.getFullYear(), nowD.getMonth(), nowD.getDate() - 7));
+  // const startMax = isoOf(new Date(nowD.getFullYear() + 2, nowD.getMonth(), nowD.getDate()));
 
   async function runLookup() {
     setLookupBusy(true);
