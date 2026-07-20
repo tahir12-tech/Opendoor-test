@@ -858,15 +858,10 @@ export function ApplicationDetail() {
                     </div>
                   </>
                 ) : (
-                  <>
-                    <div className="pay-anomaly">
-                      <Icon name="alert" strokeWidth={2.2} />
-                      <span>{pi.deedState === 'declined' ? 'Tenant declined to sign the deed. Review required.' : pi.deedState === 'voided' ? 'Deed document voided in PandaDoc. Review required.' : 'Payment refunded and the associated Deed of Guarantee has been voided.'}</span>
-                    </div>
-                    <div style={{ marginTop: 10 }}>
-                      <Button variant="primary" size="sm" block onClick={doResendDeed} disabled={deedBusy}><Icon name="file" /> {deedBusy ? 'Working…' : 'Generate deed'}</Button>
-                    </div>
-                  </>
+                  <div className="pay-anomaly">
+                    <Icon name="alert" strokeWidth={2.2} />
+                    <span>{pi.deedState === 'declined' ? 'Tenant declined to sign the deed. Review required.' : pi.deedState === 'voided' ? 'Deed document voided in PandaDoc. Review required.' : 'Payment refunded and the associated Deed of Guarantee has been voided.'}</span>
+                  </div>
                 )
               ) : (
                 <div className="deed" style={{ opacity: 0.85 }}>
