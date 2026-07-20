@@ -1196,7 +1196,7 @@ export function OrgManagement() {
               <div className="ct-row" key={c.id ?? i}>
                 <span className="ct-av">{ctInitials(c.name)}</span>
                 <div className="ct-main">
-                  <div className="ct-name">{realName(c.name, c.email) || c.email}{c.primary && <span className="ct-primary">Primary</span>}</div>
+                  <div className="ct-name word_wrap">{realName(c.name, c.email) || c.email}{c.primary && <span className="ct-primary">Primary</span>}</div>
                   <div className="ct-sub word_wrap">{[c.role, realName(c.name, c.email) ? c.email : null, c.phone].filter(Boolean).join(' · ')}</div>
                 </div>
                 <div className="ct-actions">
