@@ -200,7 +200,7 @@ export function ForgotPassword() {
                   <input
                     id="email"
                     type="email"
-                    placeholder="you@foxglove-residential.co.uk"
+                    placeholder="you@company.com"
                     autoComplete="email"
                     value={email}
                     aria-invalid={Boolean(emailError)}
