@@ -1120,7 +1120,7 @@ function requestCloseContacts() {
                 </Link>
                 {role === 'superadmin' && (
                   <div className="agency__actions" data-stop>
-                    <button className="iconbtn iconbtn--sm" title="Edit"><Icon name="edit" /></button>
+                    <button className="iconbtn iconbtn--sm" title="Edit"  onClick={() => openContacts(a.name, null)}><Icon name="edit" /></button>
                   </div>
                 )}
               </div>
