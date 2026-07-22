@@ -870,7 +870,7 @@ export function ApplicationDetail() {
                               <Button variant="primary" size="sm" block onClick={doResendDeed} disabled={deedBusy}><Icon name="file" /> {deedBusy ? 'Working…' : 'Generate deed'}</Button>
                             </div>
                           )}
-                        </>
+                        </>git 
                       )
                     ) : (
   <div className="deed" style={{ opacity: 0.85 }}>
