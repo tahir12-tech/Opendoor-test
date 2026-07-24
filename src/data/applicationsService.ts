@@ -78,7 +78,7 @@ export interface FullApp {
 }
 
 let FULL: FullApp[] = [];
-let HYDRATED = false;
+let HYDRATED = true;
 
 /** Replace the full application set from the back end (Supabase mode). */
 export function hydrateFull(rows: FullApp[]): void {
